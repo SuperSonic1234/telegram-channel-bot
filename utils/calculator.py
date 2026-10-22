@@ -114,46 +114,27 @@ class ChannelPriceCalculator:
     def format_price_message(calculation: dict) -> str:
         """
         Форматировать сообщение с расчетом цены
-        
+
         Args:
             calculation: Результат расчета из calculate_channel_price
-        
+
         Returns:
             str: Отформатированное сообщение
         """
         return f"""
 💰 <b>Расчет стоимости канала</b>
 
-📊 <b>Исходные данные:</b>
-├─ Баланс канала: <code>{calculation['initial_stars']:,.0f}</code> Stars
-
-🔄 <b>Этап 1: Вывод с канала Telegram</b>
-├─ Комиссия Telegram: <code>{calculation['telegram_fee_percent']}%</code>
-└─ После вывода: <code>{calculation['stars_after_telegram']:,.2f}</code> Stars
-
-💎 <b>Этап 2: Конвертация через Fragment</b>
-├─ Комиссия Fragment: <code>{calculation['fragment_fee_percent']}%</code>
-└─ Доступно для конвертации: <code>{calculation['stars_after_fragment']:,.2f}</code> Stars
-
-🌟 <b>Этап 3: Конвертация Stars → GRAM</b>
-├─ Курс: <code>1 Star = {calculation['stars_to_gram_rate']} GRAM</code>
-└─ Получено: <code>{calculation['gram_after_conversion']:.4f}</code> GRAM
-
-💵 <b>Этап 4: Конвертация GRAM → RUB</b>
-├─ Курс: <code>1 GRAM = {calculation['gram_to_rub_rate']:.2f} RUB</code>
-└─ Получено: <code>{calculation['rub_after_conversion']:.2f}</code> RUB
-
-💸 <b>Этап 5: Вычет комиссии ({calculation['profit_percent']}%)</b>
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-<b>🎯 ИТОГОВАЯ ЦЕНА ВЫКУПА:</b>
+<b>🎯 МЫ ГОТОВЫ КУПИТЬ ВАШ КАНАЛ ЗА:</b>
 
 💵 <code>{calculation['final_price_rub']:,.2f}</code> RUB
 💎 <code>{calculation['final_price_gram']:.4f}</code> GRAM
 ⭐ <code>{calculation['final_price_stars']:,.0f}</code> Stars
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<i>✅ Расчет выполнен с учетом всех комиссий и текущих курсов</i>
 """
     
     @staticmethod
