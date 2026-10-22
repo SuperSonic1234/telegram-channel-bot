@@ -19,6 +19,7 @@ db = Database()
 
 
 class SaleStates(StatesGroup):
+    waiting_channel_link = State()
     waiting_total_balance = State()
     waiting_available_balance = State()
     waiting_hold_balance = State()
@@ -36,14 +37,39 @@ async def start_sale(message: Message, state: FSMContext):
 
 Для расчета стоимости вашего канала нам нужны следующие данные:
 
-1️⃣ Общая сумма баланса
-2️⃣ Доступно к выводу
-3️⃣ Сумма в холде
+1️⃣ Ссылка на канал
+2️⃣ Общая сумма баланса
+3️⃣ Доступно к выводу
+4️⃣ Сумма в холде
 
 Давайте начнем!
 
-📊 Введите <b>общую сумму баланса</b> в звездах (Stars):
+🔗 Введите <b>ссылку на ваш канал</b> (например: @channel или t.me/channel):
 """
+
+    await message.answer(text, reply_markup=cancel_sale_kb())
+    await state.set_state(SaleStates.waiting_channel_link)
+
+
+@router.message(SaleStates.waiting_channel_link)
+async def process_channel_link(message: Message, state: FSMContext):
+    """Обработка ссылки на канал"""
+    channel_link = message.text.strip()
+
+    # Базовая валидация ссылки
+    if not (channel_link.startswith('@') or 't.me/' in channel_link or 'telegram.me/' in channel_link):
+        await message.answer(
+            "❌ Пожалуйста, введите корректную ссылку на канал.\n\n"
+            "Формат: @channel или t.me/channel\n\n"
+            "Попробуйте еще раз:",
+            reply_markup=cancel_sale_kb()
+        )
+        return
+
+    await state.update_data(channel_link=channel_link)
+
+    text = "✅ Ссылка на канал сохранена!\n\n"
+    text += "📊 Теперь введите <b>общую сумму баланса</b> в звездах (Stars):"
 
     await message.answer(text, reply_markup=cancel_sale_kb())
     await state.set_state(SaleStates.waiting_total_balance)
@@ -155,6 +181,7 @@ async def process_hold_balance(message: Message, state: FSMContext, bot: Bot):
         request_id = await db.create_sale_request(
             message.from_user.id,
             message.from_user.username or "unknown",
+            data['channel_link'],
             total_balance,
             available_balance,
             hold_balance,

@@ -27,6 +27,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
                     username TEXT,
+                    channel_link TEXT,
                     total_balance REAL,
                     available_balance REAL,
                     hold_balance REAL,
@@ -123,17 +124,17 @@ class Database:
             await db.commit()
 
     # === Методы для работы с заявками на продажу ===
-    async def create_sale_request(self, user_id: int, username: str,
+    async def create_sale_request(self, user_id: int, username: str, channel_link: str,
                                    total_balance: float, available_balance: float,
                                    hold_balance: float, prices: dict):
         """Создать заявку на продажу"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO sale_requests
-                (user_id, username, total_balance, available_balance, hold_balance,
+                (user_id, username, channel_link, total_balance, available_balance, hold_balance,
                  calculated_price_rub, calculated_price_gram, calculated_price_stars)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, username, total_balance, available_balance, hold_balance,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, username, channel_link, total_balance, available_balance, hold_balance,
                   prices['rub'], prices['gram'], prices['stars']))
             await db.commit()
             return cursor.lastrowid

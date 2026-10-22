@@ -41,6 +41,7 @@ async def show_requests(callback: CallbackQuery):
         for req in requests[:10]:
             text += f"📋 Заявка #{req['id']}\n"
             text += f"👤 @{req['username']} (ID: <code>{req['user_id']}</code>)\n"
+            text += f"🔗 Канал: {req['channel_link']}\n"
             text += f"💰 Баланс: {req['total_balance']} Stars\n"
             text += f"💵 Цена: {req['calculated_price_rub']} RUB\n"
             text += f"💳 Оплата: {req['payment_method'] or 'не выбрано'}\n"
