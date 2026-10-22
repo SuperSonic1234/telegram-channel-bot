@@ -261,9 +261,16 @@ async def cancel_sale(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == "send_payment_details")
+@router.callback_query(F.data.startswith("send_payment_details"))
 async def request_payment_details(callback: CallbackQuery, state: FSMContext):
     """Запрос реквизитов для выплаты"""
+    # Извлекаем request_id из callback_data если он есть
+    request_id = None
+    if ":" in callback.data:
+        request_id = int(callback.data.split(":")[1])
+        # Сохраняем request_id в state
+        await state.update_data(request_id=request_id)
+
     text = """
 📝 <b>Отправка реквизитов</b>
 

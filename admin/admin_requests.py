@@ -97,12 +97,11 @@ async def approve_request(callback: CallbackQuery, bot: Bot):
 """
 
     try:
-        # Сохраняем request_id в состоянии для дальнейшей работы
-        # (это делается через callback_data или через хранение в базе)
+        # Отправляем уведомление с request_id в кнопке
         await bot.send_message(
             request['user_id'],
             user_text,
-            reply_markup=send_payment_details_kb()
+            reply_markup=send_payment_details_kb(request_id)
         )
 
         # Обновляем сообщение админа

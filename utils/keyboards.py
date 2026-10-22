@@ -39,9 +39,10 @@ def cancel_sale_kb():
     return keyboard
 
 
-def send_payment_details_kb():
+def send_payment_details_kb(request_id: int = None):
+    callback_data = f"send_payment_details:{request_id}" if request_id else "send_payment_details"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Отправить реквизиты", callback_data="send_payment_details")]
+        [InlineKeyboardButton(text="📝 Отправить реквизиты", callback_data=callback_data)]
     ])
     return keyboard
 
