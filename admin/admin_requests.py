@@ -77,13 +77,14 @@ async def view_request_details(callback: CallbackQuery):
         return
 
     # Формируем детальное описание
+    channel_info = f"🔗 <b>Канал:</b> {request['channel_link']}\n" if request.get('channel_link') else ""
+
     text = f"""
 📋 <b>Заявка #{request['id']}</b>
 
 👤 <b>Пользователь:</b> @{request['username']}
 🆔 <b>ID:</b> <code>{request['user_id']}</code>
-🔗 <b>Канал:</b> {request['channel_link']}
-
+{channel_info}
 💰 <b>Баланс канала:</b>
    • Общий баланс: {request['total_balance']} Stars
    • Доступно к выводу: {request['available_balance']} Stars
