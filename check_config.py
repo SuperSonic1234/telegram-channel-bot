@@ -2,7 +2,10 @@
 Скрипт проверки конфигурации бота
 """
 import os
+import sys
+
 from dotenv import load_dotenv
+
 
 def check_config():
     """Проверка настроек бота"""
@@ -41,9 +44,9 @@ def check_config():
 
     if db_dir and not os.path.exists(db_dir):
         print(f"⚠️ Директория для базы данных не существует: {db_dir}")
-        print(f"   Создаем директорию...")
+        print("   Создаем директорию...")
         os.makedirs(db_dir, exist_ok=True)
-        print(f"✅ Директория создана")
+        print("✅ Директория создана")
     else:
         print(f"✅ Путь к базе данных: {db_path}")
 
@@ -61,9 +64,13 @@ def check_config():
 
 if __name__ == "__main__":
     try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         if check_config():
             print("🚀 Бот готов к запуску!")
         else:
             print("\n⚠️ Исправьте ошибки конфигурации перед запуском бота.")
+            raise SystemExit(1)
     except Exception as e:
         print(f"\n❌ Ошибка при проверке конфигурации: {e}")
+        raise SystemExit(1) from e

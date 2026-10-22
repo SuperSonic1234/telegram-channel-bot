@@ -1,433 +1,368 @@
-"""
-Обработчики для работы с заявками на продажу
-"""
-from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery
-from aiogram.fsm.context import FSMContext
+"""Администрирование заявок и выплат."""
 
+import logging
+
+from aiogram import Bot, F, Router
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+
+from config import ADMIN_ID
 from database import Database
 from utils.keyboards import (
-    request_action_kb, back_to_admin_kb,
-    send_payment_details_kb, reject_reason_kb
+    back_to_admin_kb,
+    payment_action_kb,
+    payout_reject_reason_kb,
+    reject_reason_kb,
+    request_action_kb,
+    send_payment_details_kb,
 )
-from config import ADMIN_ID
+from utils.validation import safe_html
 
 router = Router()
 db = Database()
+logger = logging.getLogger(__name__)
 
 
 def is_admin(user_id: int) -> bool:
-    """Проверка администратора"""
     return user_id == ADMIN_ID
+
+
+def _callback_id(data: str, position: int = -1) -> int | None:
+    try:
+        return int(data.split(":")[position])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+async def _require_admin(callback: CallbackQuery) -> bool:
+    if is_admin(callback.from_user.id):
+        return True
+    await callback.answer("❌ Нет доступа", show_alert=True)
+    return False
 
 
 @router.callback_query(F.data == "admin_requests")
 async def show_requests(callback: CallbackQuery):
-    """Показать список заявок"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
         return
-
     requests = await db.get_pending_requests()
-
     text = "📋 <b>Заявки на рассмотрении</b>\n\n"
-
     if not requests:
-        text += "Нет ожидающих заявок."
-        await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+        await callback.message.edit_text(text + "Нет ожидающих заявок.", reply_markup=back_to_admin_kb())
     else:
-        text += f"Всего заявок: {len(requests)}\n\n"
-        text += "<i>Выберите заявку для работы с ней:</i>"
-
-        # Создаем клавиатуру с кнопками заявок
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        keyboard = []
-        for req in requests[:10]:
-            button_text = f"#{req['id']} - @{req['username']} - {req['calculated_price_rub']} RUB"
-            keyboard.append([InlineKeyboardButton(
-                text=button_text,
-                callback_data=f"view_request:{req['id']}"
-            )])
-
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text=f"#{req['id']} - @{req['username']} - {req['calculated_price_rub']} RUB",
+                    callback_data=f"view_request:{req['id']}",
+                )
+            ]
+            for req in requests[:10]
+        ]
         keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
-
         await callback.message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            text + f"Всего заявок: {len(requests)}\n\n<i>Выберите заявку:</i>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
-
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("view_request:"))
 async def view_request_details(callback: CallbackQuery):
-    """Показать детали заявки с кнопками действий"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
         return
-
-    request_id = int(callback.data.split(":")[1])
-
-    # Получаем заявку
-    request = await db.get_sale_request(request_id)
-
+    request_id = _callback_id(callback.data)
+    request = await db.get_sale_request(request_id) if request_id else None
     if not request:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
 
-    # Формируем детальное описание
-    channel_info = f"🔗 <b>Канал:</b> {request['channel_link']}\n" if request.get('channel_link') else ""
-
+    channel = safe_html(request["channel_link"] or "не указан")
+    username = safe_html(request["username"] or "unknown")
+    payment_method = request["payment_method"].upper() if request["payment_method"] else "не выбрано"
     text = f"""
 📋 <b>Заявка #{request['id']}</b>
 
-👤 <b>Пользователь:</b> @{request['username']}
+👤 <b>Пользователь:</b> @{username}
 🆔 <b>ID:</b> <code>{request['user_id']}</code>
-{channel_info}
+🔗 <b>Канал:</b> {channel}
+
 💰 <b>Баланс канала:</b>
-   • Общий баланс: {request['total_balance']} Stars
-   • Доступно к выводу: {request['available_balance']} Stars
-   • В холде: {request['hold_balance']} Stars
+• Общий: {request['total_balance']} Stars
+• Доступно: {request['available_balance']} Stars
+• В холде: {request['hold_balance']} Stars
 
-💵 <b>Расчетная стоимость:</b>
-   • RUB: {request['calculated_price_rub']}
-   • GRAM: {request['calculated_price_gram']}
-   • Stars: {request['calculated_price_stars']}
+💵 <b>Стоимость:</b>
+• RUB: {request['calculated_price_rub']}
+• GRAM: {request['calculated_price_gram']}
+• Stars: {request['calculated_price_stars']}
 
-💳 <b>Метод оплаты:</b> {request['payment_method'].upper() if request['payment_method'] else 'не выбрано'}
+💳 <b>Метод оплаты:</b> {payment_method}
 📅 <b>Создана:</b> {request['created_at']}
 """
-
-    # Показываем с кнопками действий
-    await callback.message.edit_text(
-        text,
-        reply_markup=request_action_kb(request_id)
-    )
-
+    await callback.message.edit_text(text, reply_markup=request_action_kb(request_id))
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("approve_request:"))
 async def approve_request(callback: CallbackQuery, bot: Bot):
-    """Одобрить заявку на продажу"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
+        return
+    request_id = _callback_id(callback.data)
+    request = await db.get_sale_request(request_id) if request_id else None
+    if not request or not request["payment_method"]:
+        await callback.answer("❌ Заявка не найдена или метод оплаты не выбран", show_alert=True)
+        return
+    if not await db.transition_sale_request(request_id, "approved", ("pending",)):
+        await callback.answer("❌ Заявка уже обработана", show_alert=True)
         return
 
-    request_id = int(callback.data.split(":")[1])
-
-    # Получаем заявку
-    request = await db.get_sale_request(request_id)
-
-    if not request:
-        await callback.answer("❌ Заявка не найдена", show_alert=True)
-        return
-
-    # Обновляем статус
-    await db.update_sale_request(request_id, status='approved')
-
-    # Получаем контакт для передачи канала
-    support_contact = await db.get_setting('support_contact') or '@support'
-
-    # Уведомляем пользователя
+    support_contact = await db.get_setting("support_contact") or "@support"
+    amount = request[f"calculated_price_{request['payment_method']}"]
     user_text = f"""
 ✅ <b>Ваша заявка одобрена!</b>
 
 Мы готовы купить ваш канал за:
-💵 <b>{request['calculated_price_' + request['payment_method']]} {request['payment_method'].upper()}</b>
+💵 <b>{amount} {request['payment_method'].upper()}</b>
 
-📋 <b>Следующие шаги:</b>
-
-1️⃣ Передайте права администратора канала на контакт: {support_contact}
+1️⃣ Передайте права администратора канала на контакт: {safe_html(support_contact)}
 ⏱ У вас есть 24 часа на передачу канала.
 
-2️⃣ После передачи прав, отправьте реквизиты для получения выплаты, нажав на кнопку ниже.
+2️⃣ После передачи прав отправьте реквизиты кнопкой ниже.
 
-⚠️ Выплата будет произведена после подтверждения передачи канала.
+⚠️ Выплата производится после подтверждения передачи канала.
 """
-
     try:
-        # Отправляем уведомление с request_id в кнопке
         await bot.send_message(
-            request['user_id'],
-            user_text,
-            reply_markup=send_payment_details_kb(request_id)
+            request["user_id"], user_text, reply_markup=send_payment_details_kb(request_id)
         )
-
-        # Обновляем сообщение админа
-        await callback.message.edit_text(
-            f"✅ Заявка #{request_id} одобрена!\n\n"
-            f"Пользователь @{request['username']} уведомлен.",
-            reply_markup=back_to_admin_kb()
-        )
-
-        # Добавляем в историю покупок
         await db.add_purchase(
-            request['user_id'],
-            request['username'],
-            'pending',  # Канал пока не передан
-            request['calculated_price_' + request['payment_method']],
-            request['payment_method'],
-            'approved'
+            request_id,
+            request["user_id"],
+            request["username"],
+            request["channel_link"] or "N/A",
+            amount,
+            request["payment_method"],
+            "approved",
         )
+    except Exception as exc:
+        await db.transition_sale_request(request_id, "pending", ("approved",))
+        logger.exception("Ошибка одобрения заявки %s", request_id)
+        await callback.answer(f"❌ Не удалось уведомить пользователя: {exc}", show_alert=True)
+        return
 
-    except Exception as e:
-        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
-
-    await callback.answer()
+    await callback.message.edit_text(
+        f"✅ Заявка #{request_id} одобрена. Пользователь уведомлен.",
+        reply_markup=back_to_admin_kb(),
+    )
+    await callback.answer("✅ Заявка одобрена")
 
 
 @router.callback_query(F.data.startswith("reject_request:"))
 async def show_reject_reasons(callback: CallbackQuery):
-    """Показать причины отказа"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
         return
-
-    request_id = int(callback.data.split(":")[1])
-
-    text = """
-❌ <b>Отказ в покупке канала</b>
-
-Выберите причину отказа:
-"""
-
-    await callback.message.edit_text(text, reply_markup=reject_reason_kb(request_id))
+    request_id = _callback_id(callback.data)
+    if not request_id:
+        await callback.answer("❌ Некорректная заявка", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "❌ <b>Отказ в покупке канала</b>\n\nВыберите причину:",
+        reply_markup=reject_reason_kb(request_id),
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("reject_reason:"))
 async def reject_request(callback: CallbackQuery, bot: Bot):
-    """Отказать в покупке канала"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
         return
-
     parts = callback.data.split(":")
-    reason_key = parts[1]
-    request_id = int(parts[2])
-
-    # Получаем заявку
-    request = await db.get_sale_request(request_id)
-
+    if len(parts) != 3:
+        await callback.answer("❌ Некорректная команда", show_alert=True)
+        return
+    reason_key, request_id = parts[1], _callback_id(callback.data)
+    request = await db.get_sale_request(request_id) if request_id else None
     if not request:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
 
-    # Обновляем статус
-    await db.update_sale_request(request_id, status='rejected')
-
-    # Определяем текст причины
     reasons = {
-        'not_transferred': '1. Вы не передали канал в указанные сроки.',
-        'wrong_data': '2. Указанные данные не соответствуют действительности.',
-        'blocked': '3. Канал заблокирован или имеет ограничения.'
+        "not_transferred": "Вы не передали канал в указанные сроки.",
+        "wrong_data": "Указанные данные не соответствуют действительности.",
+        "blocked": "Канал заблокирован или имеет ограничения.",
     }
+    reason_text = reasons.get(reason_key)
+    if not reason_text:
+        await callback.answer("❌ Неизвестная причина", show_alert=True)
+        return
+    if not await db.transition_sale_request(request_id, "rejected", ("pending", "approved")):
+        await callback.answer("❌ Заявка уже обработана", show_alert=True)
+        return
 
-    reason_text = reasons.get(reason_key, 'Не указана')
-
-    # Получаем контакт поддержки
-    support_contact = await db.get_setting('support_contact') or '@support'
-
-    # Уведомляем пользователя
-    user_text = f"""
-❌ <b>В покупке канала отказано</b>
-
-<b>Причина отказа:</b>
-{reason_text}
-
-Если вы не согласны с решением, свяжитесь с {support_contact}
-
-📋 Номер заявки: <code>{request_id}</code>
-"""
-
+    support_contact = await db.get_setting("support_contact") or "@support"
+    await db.add_purchase(
+        request_id,
+        request["user_id"],
+        request["username"],
+        request["channel_link"] or "N/A",
+        request[f"calculated_price_{request['payment_method']}"] if request["payment_method"] else 0,
+        request["payment_method"] or "N/A",
+        "rejected",
+    )
     try:
-        await bot.send_message(request['user_id'], user_text)
-
-        # Обновляем сообщение админа
-        await callback.message.edit_text(
-            f"❌ Заявка #{request_id} отклонена!\n\n"
-            f"Причина: {reason_text}\n"
-            f"Пользователь @{request['username']} уведомлен.",
-            reply_markup=back_to_admin_kb()
+        await bot.send_message(
+            request["user_id"],
+            f"❌ <b>В покупке канала отказано</b>\n\n"
+            f"<b>Причина:</b> {reason_text}\n\n"
+            f"Если вы не согласны, свяжитесь с {safe_html(support_contact)}\n"
+            f"📋 Номер заявки: <code>{request_id}</code>",
         )
+    except Exception:
+        logger.exception("Не удалось уведомить об отказе по заявке %s", request_id)
 
-        # Добавляем в историю
-        await db.add_purchase(
-            request['user_id'],
-            request['username'],
-            'N/A',
-            request['calculated_price_' + request['payment_method']],
-            request['payment_method'],
-            'rejected'
-        )
-
-    except Exception as e:
-        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
-
-    await callback.answer()
+    await callback.message.edit_text(
+        f"❌ Заявка #{request_id} отклонена.\nПричина: {reason_text}",
+        reply_markup=back_to_admin_kb(),
+    )
+    await callback.answer("Заявка отклонена")
 
 
 @router.callback_query(F.data.startswith("payout_done:"))
 async def payout_completed(callback: CallbackQuery, bot: Bot):
-    """Выплата произведена"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
         return
-
-    request_id = int(callback.data.split(":")[1])
-
-    # Получаем заявку
-    request = await db.get_sale_request(request_id)
-
-    if not request:
+    request_id = _callback_id(callback.data)
+    request = await db.get_sale_request(request_id) if request_id else None
+    if not request or not request["payment_method"]:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
+    if not await db.complete_payout(request_id):
+        await callback.answer("❌ Выплата уже обработана или еще не готова", show_alert=True)
+        return
 
-    # Обновляем статус
-    await db.update_sale_request(request_id, status='completed')
-
-    # Обновляем статистику пользователя
-    await db.update_user_stats(
-        request['user_id'],
-        request['calculated_price_rub']
-    )
-
-    # Уведомляем пользователя
-    user_text = f"""
-✅ <b>Выплата отправлена!</b>
-
-Ваша выплата в размере <b>{request['calculated_price_' + request['payment_method']]} {request['payment_method'].upper()}</b> успешно отправлена.
-
-Спасибо за сотрудничество! 🤝
-Ждем вас снова!
-
-💰 Продать еще канал: /start
-"""
-
+    amount = request[f"calculated_price_{request['payment_method']}"]
+    notification_error = False
     try:
-        await bot.send_message(request['user_id'], user_text)
-
-        # Обновляем сообщение админа
-        await callback.message.edit_text(
-            f"✅ Выплата по заявке #{request_id} выполнена!\n\n"
-            f"Пользователь @{request['username']} уведомлен.\n"
-            f"Сумма: {request['calculated_price_' + request['payment_method']]} {request['payment_method'].upper()}",
-            reply_markup=back_to_admin_kb()
+        await bot.send_message(
+            request["user_id"],
+            f"✅ <b>Выплата отправлена!</b>\n\n"
+            f"Выплата <b>{amount} {request['payment_method'].upper()}</b> успешно отправлена.\n\n"
+            "Спасибо за сотрудничество! 🤝",
         )
+    except Exception:
+        notification_error = True
+        logger.exception("Не удалось уведомить о выплате по заявке %s", request_id)
 
-    except Exception as e:
-        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
-
+    suffix = "\n⚠️ Пользователя уведомить не удалось." if notification_error else ""
+    await callback.message.edit_text(
+        f"✅ Выплата по заявке #{request_id} выполнена.\nСумма: "
+        f"{amount} {request['payment_method'].upper()}{suffix}",
+        reply_markup=back_to_admin_kb(),
+    )
     await callback.answer("✅ Выплата отмечена как выполненная")
 
 
 @router.callback_query(F.data.startswith("payout_reject:"))
-async def payout_rejected(callback: CallbackQuery, bot: Bot):
-    """Отказ в выплате"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+async def payout_rejected(callback: CallbackQuery):
+    if not await _require_admin(callback):
         return
+    request_id = _callback_id(callback.data)
+    if not request_id:
+        await callback.answer("❌ Некорректная заявка", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "❌ <b>Отказ в выплате</b>\n\nВыберите причину:",
+        reply_markup=payout_reject_reason_kb(request_id),
+    )
+    await callback.answer()
 
-    request_id = int(callback.data.split(":")[1])
 
-    # Получаем заявку
-    request = await db.get_sale_request(request_id)
-
+@router.callback_query(F.data.startswith("payout_reject_reason:"))
+async def payout_reject_reason(callback: CallbackQuery, bot: Bot):
+    if not await _require_admin(callback):
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("❌ Некорректная команда", show_alert=True)
+        return
+    reason_key, request_id = parts[1], _callback_id(callback.data)
+    request = await db.get_sale_request(request_id) if request_id else None
     if not request:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
-
-    # Показываем причины отказа
-    text = """
-❌ <b>Отказ в выплате</b>
-
-Выберите причину отказа:
-"""
-
-    await callback.message.edit_text(text, reply_markup=reject_reason_kb(request_id))
-    await callback.answer()
+    reasons = {
+        "wrong_details": "Указаны некорректные реквизиты.",
+        "not_transferred": "Канал не был передан.",
+        "terms_violation": "Нарушены условия сделки.",
+    }
+    reason_text = reasons.get(reason_key)
+    if not reason_text or not await db.reject_payout(request_id):
+        await callback.answer("❌ Выплата уже обработана", show_alert=True)
+        return
+    try:
+        await bot.send_message(
+            request["user_id"],
+            f"❌ <b>В выплате отказано</b>\n\n<b>Причина:</b> {reason_text}\n"
+            f"📋 Номер заявки: <code>{request_id}</code>",
+        )
+    except Exception:
+        logger.exception("Не удалось уведомить об отказе выплаты %s", request_id)
+    await callback.message.edit_text(
+        f"❌ Выплата по заявке #{request_id} отклонена.\nПричина: {reason_text}",
+        reply_markup=back_to_admin_kb(),
+    )
+    await callback.answer("Выплата отклонена")
 
 
 @router.callback_query(F.data == "admin_payments")
 async def show_payments(callback: CallbackQuery):
-    """Показать заявки на выплату"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
         return
-
-    # Получаем одобренные заявки с реквизитами
     payments = await db.get_payments_pending()
-
     text = "💳 <b>Заявки на выплату</b>\n\n"
-
     if not payments:
-        text += "Нет заявок на выплату."
-        await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+        await callback.message.edit_text(text + "Нет заявок на выплату.", reply_markup=back_to_admin_kb())
     else:
-        text += f"Всего заявок: {len(payments)}\n\n"
-        text += "<i>Выберите заявку для работы с ней:</i>"
-
-        # Создаем клавиатуру с кнопками заявок
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        keyboard = []
-        for payment in payments[:10]:
-            button_text = f"#{payment['id']} - @{payment['username']} - {payment['amount']} {payment['currency'].upper()}"
-            keyboard.append([InlineKeyboardButton(
-                text=button_text,
-                callback_data=f"view_payment:{payment['request_id']}"
-            )])
-
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text=f"#{p['id']} - @{p['username']} - {p['amount']} {p['currency'].upper()}",
+                    callback_data=f"view_payment:{p['request_id']}",
+                )
+            ]
+            for p in payments[:10]
+        ]
         keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
-
         await callback.message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            text + f"Всего заявок: {len(payments)}\n\n<i>Выберите заявку:</i>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         )
-
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("view_payment:"))
 async def view_payment_details(callback: CallbackQuery):
-    """Показать детали заявки на выплату"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
+    if not await _require_admin(callback):
         return
-
-    request_id = int(callback.data.split(":")[1])
-
-    # Получаем заявку и платеж
-    request = await db.get_sale_request(request_id)
-    payment = await db.get_payment_by_request(request_id)
-
+    request_id = _callback_id(callback.data)
+    request = await db.get_sale_request(request_id) if request_id else None
+    payment = await db.get_payment_by_request(request_id) if request_id else None
     if not request or not payment:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
-
-    # Формируем детальное описание
     text = f"""
 💳 <b>Заявка на выплату #{request['id']}</b>
 
-👤 <b>Пользователь:</b> @{request['username']}
+👤 <b>Пользователь:</b> @{safe_html(request['username'] or 'unknown')}
 🆔 <b>ID:</b> <code>{request['user_id']}</code>
-🔗 <b>Канал:</b> {request['channel_link']}
+🔗 <b>Канал:</b> {safe_html(request['channel_link'] or 'N/A')}
 
-💰 <b>Сумма выплаты:</b>
-{payment['amount']} {payment['currency'].upper()}
+💰 <b>Сумма:</b> {payment['amount']} {payment['currency'].upper()}
 
 📝 <b>Реквизиты:</b>
-{payment['payment_details']}
+<code>{safe_html(payment['payment_details'] or '')}</code>
 
-📅 <b>Создана:</b> {request['created_at']}
+📅 <b>Создана:</b> {payment['created_at']}
 """
-
-    # Показываем с кнопками действий
-    await callback.message.edit_text(
-        text,
-        reply_markup=payment_action_kb(request_id)
-    )
-
+    await callback.message.edit_text(text, reply_markup=payment_action_kb(request_id))
     await callback.answer()

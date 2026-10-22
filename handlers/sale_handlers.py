@@ -1,21 +1,25 @@
-"""
-Обработчики для процесса продажи канала
-"""
-from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+"""Обработчики процесса продажи канала."""
+
+import logging
+
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 
-from database import Database
-from utils.keyboards import (
-    main_menu_kb, payment_method_kb, cancel_sale_kb,
-    send_payment_details_kb
-)
-from utils.calculator import ChannelPriceCalculator
 from config import ADMIN_ID
+from database import Database
+from utils.calculator import ChannelPriceCalculator
+from utils.keyboards import (
+    cancel_sale_kb,
+    main_menu_kb,
+    payment_method_kb,
+)
+from utils.validation import parse_finite_number, safe_html
 
 router = Router()
 db = Database()
+logger = logging.getLogger(__name__)
 
 
 class SaleStates(StatesGroup):
@@ -54,6 +58,9 @@ async def start_sale(message: Message, state: FSMContext):
 @router.message(SaleStates.waiting_channel_link)
 async def process_channel_link(message: Message, state: FSMContext):
     """Обработка ссылки на канал"""
+    if not message.text:
+        await message.answer("❌ Отправьте ссылку текстом.", reply_markup=cancel_sale_kb())
+        return
     channel_link = message.text.strip()
 
     # Базовая валидация ссылки
@@ -79,7 +86,7 @@ async def process_channel_link(message: Message, state: FSMContext):
 async def process_total_balance(message: Message, state: FSMContext):
     """Обработка общего баланса"""
     try:
-        total_balance = float(message.text.replace(',', '.'))
+        total_balance = parse_finite_number(message.text)
         if total_balance <= 0:
             raise ValueError
 
@@ -103,7 +110,7 @@ async def process_total_balance(message: Message, state: FSMContext):
 async def process_available_balance(message: Message, state: FSMContext):
     """Обработка доступного баланса"""
     try:
-        available_balance = float(message.text.replace(',', '.'))
+        available_balance = parse_finite_number(message.text)
         if available_balance < 0:
             raise ValueError
 
@@ -135,10 +142,10 @@ async def process_available_balance(message: Message, state: FSMContext):
 
 
 @router.message(SaleStates.waiting_hold_balance)
-async def process_hold_balance(message: Message, state: FSMContext, bot: Bot):
+async def process_hold_balance(message: Message, state: FSMContext):
     """Обработка холд баланса и расчет стоимости"""
     try:
-        hold_balance = float(message.text.replace(',', '.'))
+        hold_balance = parse_finite_number(message.text)
         if hold_balance < 0:
             raise ValueError
 
@@ -210,23 +217,40 @@ async def process_hold_balance(message: Message, state: FSMContext, bot: Bot):
         )
 
 
-@router.callback_query(F.data.startswith("payment_"))
+@router.callback_query(
+    SaleStates.waiting_payment_choice,
+    F.data.in_({"payment_rub", "payment_gram", "payment_stars"}),
+)
 async def process_payment_choice(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Обработка выбора метода оплаты"""
     payment_method = callback.data.split("_")[1]  # rub, gram, stars
 
     data = await state.get_data()
-    request_id = data['request_id']
-    prices = data['prices']
+    request_id = data.get('request_id')
+    prices = data.get('prices')
+    if not request_id or not prices:
+        await callback.answer("❌ Сессия устарела. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    request = await db.get_sale_request(request_id)
+    if not request or request['user_id'] != callback.from_user.id or request['status'] != 'draft':
+        await callback.answer("❌ Эта заявка уже обработана.", show_alert=True)
+        await state.clear()
+        return
 
     # Обновляем заявку
     await db.update_sale_request(request_id, payment_method=payment_method)
+    if not await db.transition_sale_request(request_id, 'pending', ('draft',)):
+        await callback.answer("❌ Эта заявка уже обработана.", show_alert=True)
+        await state.clear()
+        return
 
     # Отправляем заявку админу
     admin_text = f"""
 🔔 <b>Новая заявка на продажу канала!</b>
 
-👤 Пользователь: @{callback.from_user.username or 'unknown'}
+👤 Пользователь: @{safe_html(callback.from_user.username or 'unknown')}
 🆔 ID: <code>{callback.from_user.id}</code>
 
 📊 <b>Данные канала:</b>
@@ -253,8 +277,8 @@ async def process_payment_choice(callback: CallbackQuery, state: FSMContext, bot
             admin_text,
             reply_markup=request_action_kb(request_id)
         )
-    except Exception as e:
-        print(f"Ошибка отправки админу: {e}")
+    except Exception:
+        logger.exception("Не удалось отправить заявку %s администратору", request_id)
 
     # Уведомляем пользователя
     user_text = """
@@ -278,6 +302,10 @@ async def process_payment_choice(callback: CallbackQuery, state: FSMContext, bot
 @router.callback_query(F.data == "cancel_sale")
 async def cancel_sale(callback: CallbackQuery, state: FSMContext):
     """Отмена продажи канала"""
+    data = await state.get_data()
+    request_id = data.get('request_id')
+    if request_id:
+        await db.transition_sale_request(request_id, 'cancelled', ('draft',))
     await state.clear()
 
     await callback.message.edit_text("❌ Продажа канала отменена.")
@@ -294,7 +322,20 @@ async def request_payment_details(callback: CallbackQuery, state: FSMContext):
     # Извлекаем request_id из callback_data если он есть
     request_id = None
     if ":" in callback.data:
-        request_id = int(callback.data.split(":")[1])
+        try:
+            request_id = int(callback.data.split(":", 1)[1])
+        except (IndexError, ValueError):
+            await callback.answer("❌ Некорректная заявка", show_alert=True)
+            return
+
+        request = await db.get_sale_request(request_id)
+        if (
+            not request
+            or request['user_id'] != callback.from_user.id
+            or request['status'] != 'approved'
+        ):
+            await callback.answer("❌ Заявка недоступна", show_alert=True)
+            return
         # Сохраняем request_id в state
         await state.update_data(request_id=request_id)
 
@@ -318,7 +359,10 @@ async def request_payment_details(callback: CallbackQuery, state: FSMContext):
 @router.message(SaleStates.waiting_payment_details)
 async def process_payment_details(message: Message, state: FSMContext, bot: Bot):
     """Обработка реквизитов для выплаты"""
-    payment_details = message.text
+    if not message.text or not message.text.strip():
+        await message.answer("❌ Отправьте реквизиты текстом.")
+        return
+    payment_details = message.text.strip()
 
     data = await state.get_data()
     request_id = data.get('request_id')
@@ -334,7 +378,7 @@ async def process_payment_details(message: Message, state: FSMContext, bot: Bot)
     # Получаем данные заявки
     request = await db.get_sale_request(request_id)
 
-    if not request:
+    if not request or request['user_id'] != message.from_user.id:
         await message.answer(
             "❌ Произошла ошибка. Заявка не найдена.",
             reply_markup=main_menu_kb()
@@ -342,35 +386,46 @@ async def process_payment_details(message: Message, state: FSMContext, bot: Bot)
         await state.clear()
         return
 
-    # Обновляем заявку
-    await db.update_sale_request(
-        request_id,
-        payment_details=payment_details,
-        status='awaiting_payout'
-    )
+    if request['status'] != 'approved' or not request['payment_method']:
+        await message.answer(
+            "❌ Эта заявка уже обработана или еще не одобрена.",
+            reply_markup=main_menu_kb(),
+        )
+        await state.clear()
+        return
+
+    if not await db.transition_sale_request(request_id, 'awaiting_payout', ('approved',)):
+        await message.answer("❌ Эта заявка уже обработана.", reply_markup=main_menu_kb())
+        await state.clear()
+        return
+    await db.update_sale_request(request_id, payment_details=payment_details)
 
     # Создаем запись о выплате
     amount = request['calculated_price_' + request['payment_method']]
-    await db.create_payment(
-        request_id,
-        message.from_user.id,
-        payment_details,
-        amount,
-        request['payment_method']
-    )
+    try:
+        await db.create_payment(
+            request_id,
+            message.from_user.id,
+            payment_details,
+            amount,
+            request['payment_method']
+        )
+    except Exception:
+        await db.transition_sale_request(request_id, 'approved', ('awaiting_payout',))
+        raise
 
     # Отправляем админу заявку на выплату
     admin_text = f"""
 💳 <b>Заявка на выплату</b>
 
-👤 Пользователь: @{message.from_user.username or 'unknown'}
+👤 Пользователь: @{safe_html(message.from_user.username or 'unknown')}
 🆔 ID: <code>{message.from_user.id}</code>
 
 💰 Сумма: {request['calculated_price_' + request['payment_method']]} {request['payment_method'].upper()}
 💳 Метод: {request['payment_method'].upper()}
 
 📝 <b>Реквизиты:</b>
-<code>{payment_details}</code>
+<code>{safe_html(payment_details)}</code>
 
 📋 ID заявки: <code>{request_id}</code>
 """
@@ -383,8 +438,8 @@ async def process_payment_details(message: Message, state: FSMContext, bot: Bot)
             admin_text,
             reply_markup=payment_action_kb(request_id)
         )
-    except Exception as e:
-        print(f"Ошибка отправки админу: {e}")
+    except Exception:
+        logger.exception("Не удалось отправить выплату по заявке %s администратору", request_id)
 
     # Уведомляем пользователя
     user_text = """

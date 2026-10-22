@@ -3,15 +3,17 @@
 """
 import asyncio
 import logging
+
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+from admin import admin_handlers, admin_requests, admin_settings
 from config import BOT_TOKEN
 from database import Database
 
 # Импортируем обработчики
-from handlers import user_handlers, sale_handlers, support_handlers
-from admin import admin_handlers, admin_requests, admin_settings
+from handlers import sale_handlers, support_handlers, user_handlers
 
 # Настройка логирования
 logging.basicConfig(
@@ -24,7 +26,13 @@ logger = logging.getLogger(__name__)
 async def main():
     """Запуск бота"""
     # Инициализация бота
-    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN is not configured")
+
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
 
     # Инициализация диспетчера
     dp = Dispatcher()

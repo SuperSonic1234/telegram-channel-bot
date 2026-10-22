@@ -28,7 +28,7 @@ Port: 58595
 📌 ШАГ 3: Введите данные
 
 login as: root
-password: 2baFUY7uBt9cB
+password: YOUR_SERVER_PASSWORD
 
 (пароль не будет виден при вводе - это нормально)
 
@@ -69,7 +69,7 @@ password: 2baFUY7uBt9cB
 Выполните:
 ssh -p 58595 root@132.243.194.9
 
-Пароль: 2baFUY7uBt9cB
+Пароль: YOUR_SERVER_PASSWORD
 
 Затем скопируйте команды из ONE_COMMAND_DEPLOY.sh
 

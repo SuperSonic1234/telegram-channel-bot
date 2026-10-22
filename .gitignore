@@ -49,6 +49,5 @@ temp/
 # Documentation builds (if needed later)
 docs/_build/
 
-# Test files
-test_*.py
-*_test.py
+# Test caches
+.pytest_cache/

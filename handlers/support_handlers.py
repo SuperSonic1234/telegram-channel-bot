@@ -1,17 +1,20 @@
-"""
-Обработчики для системы поддержки
-"""
-from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+"""Обработчики системы поддержки."""
+
+import logging
+
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 
-from database import Database
-from utils.keyboards import support_menu_kb, back_to_main_kb, main_menu_kb
 from config import ADMIN_ID
+from database import Database
+from utils.keyboards import back_to_main_kb, main_menu_kb, support_menu_kb
+from utils.validation import safe_html
 
 router = Router()
 db = Database()
+logger = logging.getLogger(__name__)
 
 
 class SupportStates(StatesGroup):
@@ -67,12 +70,12 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
     admin_text = f"""
 💬 <b>Новое обращение в поддержку</b>
 
-👤 От: @{message.from_user.username or 'unknown'}
+👤 От: @{safe_html(message.from_user.username or 'unknown')}
 🆔 ID: <code>{message.from_user.id}</code>
 🎫 Тикет: <code>{ticket_id}</code>
 
 📝 <b>Сообщение:</b>
-{ticket_text}
+{safe_html(ticket_text)}
 """
 
     from utils.keyboards import ticket_action_kb
@@ -93,18 +96,24 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
                 admin_text,
                 reply_markup=ticket_action_kb(ticket_id)
             )
-    except Exception as e:
-        print(f"Ошибка отправки админу: {e}")
+    except Exception:
+        logger.exception("Не удалось отправить тикет %s администратору", ticket_id)
+        await message.answer(
+            "❌ Не удалось передать обращение администратору. Попробуйте позже.",
+            reply_markup=main_menu_kb(),
+        )
+        await state.clear()
+        return
 
     # Уведомляем пользователя
-    user_text = """
+    user_text = f"""
 ✅ <b>Обращение отправлено!</b>
 
 Ваше обращение принято и передано модератору.
 Ожидайте ответа. Мы свяжемся с вами в ближайшее время.
 
-🎫 Номер вашего обращения: <code>{}</code>
-""".format(ticket_id)
+🎫 Номер вашего обращения: <code>{ticket_id}</code>
+"""
 
     await message.answer(user_text, reply_markup=main_menu_kb())
     await state.clear()

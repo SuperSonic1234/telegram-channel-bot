@@ -1,7 +1,12 @@
 """
 Модуль с клавиатурами для бота
 """
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 
 # === Главное меню ===
@@ -39,7 +44,7 @@ def cancel_sale_kb():
     return keyboard
 
 
-def send_payment_details_kb(request_id: int = None):
+def send_payment_details_kb(request_id: int | None = None):
     callback_data = f"send_payment_details:{request_id}" if request_id else "send_payment_details"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Отправить реквизиты", callback_data=callback_data)]
@@ -127,6 +132,24 @@ def reject_reason_kb(request_id: int):
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_requests")]
     ])
     return keyboard
+
+
+def payout_reject_reason_kb(request_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="Некорректные реквизиты",
+            callback_data=f"payout_reject_reason:wrong_details:{request_id}",
+        )],
+        [InlineKeyboardButton(
+            text="Канал не передан",
+            callback_data=f"payout_reject_reason:not_transferred:{request_id}",
+        )],
+        [InlineKeyboardButton(
+            text="Нарушение условий сделки",
+            callback_data=f"payout_reject_reason:terms_violation:{request_id}",
+        )],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_payments")],
+    ])
 
 
 def ticket_action_kb(ticket_id: int):

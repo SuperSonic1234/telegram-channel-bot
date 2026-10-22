@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Определяем путь к .env файлу
@@ -9,7 +10,10 @@ env_path = Path(__file__).parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # ID админа (для управления ботом)
+try:
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+except ValueError as exc:
+    raise RuntimeError("ADMIN_ID must be an integer") from exc
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/bot.db")
 
 # Курсы и комиссии (обновляются в админке)

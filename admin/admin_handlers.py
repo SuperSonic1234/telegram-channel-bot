@@ -1,19 +1,27 @@
 """
 Основные обработчики админ-панели
 """
-from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from config import ADMIN_ID
 from database import Database
-from utils.keyboards import (
-    admin_panel_kb, admin_history_kb, back_to_admin_kb,
-    confirm_broadcast_kb, ticket_action_kb
-)
 from utils.calculator import ChannelPriceCalculator
+from utils.keyboards import (
+    admin_history_kb,
+    admin_panel_kb,
+    back_to_admin_kb,
+    confirm_broadcast_kb,
+)
+from utils.validation import parse_finite_number, safe_html
 
 router = Router()
 db = Database()
@@ -53,12 +61,13 @@ async def admin_panel(message: Message):
 
 
 @router.callback_query(F.data == "admin_panel")
-async def show_admin_panel_callback(callback: CallbackQuery):
+async def show_admin_panel_callback(callback: CallbackQuery, state: FSMContext):
     """Показать админ-панель (из callback)"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
 
+    await state.clear()
     text = """
 ⚙️ <b>Админ-панель</b>
 
@@ -173,6 +182,10 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, bot: Bot
 
     data = await state.get_data()
     message_id = data.get('broadcast_message_id')
+    if not message_id:
+        await callback.answer("❌ Черновик рассылки не найден", show_alert=True)
+        await state.clear()
+        return
 
     users = await db.get_all_users()
 
@@ -190,7 +203,7 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, bot: Bot
                 message_id=message_id
             )
             success += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - Telegram may raise several API errors
             failed += 1
             print(f"Не удалось отправить пользователю {user['user_id']}: {e}")
 
@@ -292,18 +305,24 @@ async def show_support_tickets(callback: CallbackQuery):
         text += "Нет открытых обращений."
     else:
         for ticket in tickets[:20]:
-            text += f"🎫 Тикет #{ticket['id']}\n"
-            text += f"👤 @{ticket['username']} (ID: <code>{ticket['user_id']}</code>)\n"
-            text += f"📝 {ticket['message'][:100]}...\n"
-            text += f"📅 {ticket['created_at']}\n\n"
-
-            # Добавляем кнопку для ответа
-            # Но через текст это неудобно, поэтому лучше использовать инлайн-кнопки
+            text += f"🎫 #{ticket['id']} — @{safe_html(ticket['username'])}\n"
+            text += f"📝 {safe_html(ticket['message'][:100])}\n\n"
 
         if len(tickets) > 20:
             text += f"\n... и еще {len(tickets) - 20} обращений"
 
-    await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    keyboard = [
+        [InlineKeyboardButton(
+            text=f"Ответить на тикет #{ticket['id']}",
+            callback_data=f"ticket_reply:{ticket['id']}",
+        )]
+        for ticket in tickets[:20]
+    ]
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+    )
     await callback.answer()
 
 
@@ -338,26 +357,25 @@ async def process_ticket_reply(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     ticket_id = data.get('ticket_id')
 
-    # Получаем данные тикета
-    async with db.db_path as conn:
-        async with conn.execute(
-            "SELECT user_id, username FROM support_tickets WHERE id = ?",
-            (ticket_id,)
-        ) as cursor:
-            ticket = await cursor.fetchone()
+    ticket = await db.get_ticket(ticket_id)
 
     if not ticket:
         await message.answer("❌ Тикет не найден.")
         await state.clear()
         return
 
-    user_id = ticket[0]
+    if ticket['status'] != 'open':
+        await message.answer("❌ Тикет уже закрыт.")
+        await state.clear()
+        return
+
+    user_id = ticket['user_id']
 
     # Отправляем ответ пользователю
     user_text = f"""
 💬 <b>Ответ от поддержки</b>
 
-{message.text}
+{safe_html(message.text or '')}
 
 Ваше обращение #{ticket_id} закрыто.
 Если у вас остались вопросы, создайте новое обращение.
@@ -370,7 +388,7 @@ async def process_ticket_reply(message: Message, state: FSMContext, bot: Bot):
         # Закрываем тикет
         await db.close_ticket(ticket_id)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - Telegram may raise several API errors
         await message.answer(f"❌ Ошибка отправки: {e}")
 
     await state.clear()
@@ -403,7 +421,7 @@ async def process_calculator(message: Message, state: FSMContext):
         return
 
     try:
-        stars_amount = float(message.text.replace(',', '.').replace(' ', ''))
+        stars_amount = parse_finite_number(message.text)
 
         if stars_amount <= 0:
             await message.answer("❌ Количество звезд должно быть больше нуля. Попробуйте еще раз:")
@@ -426,7 +444,7 @@ async def process_calculator(message: Message, state: FSMContext):
 
     except ValueError:
         await message.answer("❌ Неверный формат. Введите число (например: 10000):")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - external rate/API errors are user-facing here
         await message.answer(f"❌ Ошибка расчета: {e}")
         await state.clear()
 

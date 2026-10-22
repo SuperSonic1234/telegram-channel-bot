@@ -63,7 +63,7 @@ FINAL_FILES_LIST.txt            # Этот файл
 
 1. Подключиться к серверу:
    ssh -p 58595 root@132.243.194.9
-   Пароль: 2baFUY7uBt9cB
+   Пароль: YOUR_SERVER_PASSWORD
 
 2. Выполнить деплой (выберите один вариант):
 
@@ -92,7 +92,7 @@ FINAL_FILES_LIST.txt            # Этот файл
 📊 КОНФИГУРАЦИЯ БОТА:
 ===========================================
 
-BOT_TOKEN: 8946911601:AAGBisB9ZAhsY7sYe-ZSc8P8_PEKHN6VOMI
+BOT_TOKEN: YOUR_BOT_TOKEN
 ADMIN_ID: 970377911
 DATABASE: SQLite (data/bot.db)
 API: CoinGecko (бесплатный)

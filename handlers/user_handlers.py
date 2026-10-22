@@ -1,14 +1,15 @@
 """
 Обработчики для пользовательских команд
 """
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 
 from config import ADMIN_ID
 from database import Database
-from utils.keyboards import main_menu_kb, back_to_main_kb
+from utils.keyboards import main_menu_kb
+from utils.validation import safe_html
 
 router = Router()
 db = Database()
@@ -48,7 +49,7 @@ async def show_profile(message: Message):
 👤 <b>Ваш профиль</b>
 
 🆔 ID: <code>{user['user_id']}</code>
-👤 Username: @{user['username'] or 'не указан'}
+👤 Username: @{safe_html(user['username'] or 'не указан')}
 📊 Продано каналов: {user['channels_sold']}
 💰 Заработано: {user['total_earned']:.2f} RUB
 """

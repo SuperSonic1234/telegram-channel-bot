@@ -19,6 +19,11 @@ class ChannelPriceCalculator:
         Returns:
             dict: Детальный расчет с ценами в разных валютах
         """
+        if total_stars <= 0:
+            raise ValueError("Количество Stars должно быть больше нуля")
+        if not 0 <= profit_percent <= 100:
+            raise ValueError("Процент прибыли должен быть от 0 до 100")
+
         # Получаем актуальные курсы
         rates = await get_actual_rates()
         
@@ -81,6 +86,8 @@ class ChannelPriceCalculator:
         Returns:
             dict: Чистые суммы в разных валютах
         """
+        if total_stars <= 0:
+            raise ValueError("Количество Stars должно быть больше нуля")
         rates = await get_actual_rates()
         
         gram_to_rub = rates['gram_to_rub']

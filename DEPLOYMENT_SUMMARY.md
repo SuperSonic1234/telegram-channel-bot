@@ -42,7 +42,7 @@
 ```bash
 ssh -p 58595 root@132.243.194.9
 ```
-Пароль: `2baFUY7uBt9cB`
+Пароль: `YOUR_SERVER_PASSWORD`
 
 2. Скопируйте и вставьте содержимое файла `ONE_COMMAND_DEPLOY.sh`
 
@@ -58,7 +58,7 @@ ssh -p 58595 root@132.243.194.9
 
 ## 📊 Данные бота
 
-- **Токен**: `8946911601:AAGBisB9ZAhsY7sYe-ZSc8P8_PEKHN6VOMI`
+- **Токен**: `YOUR_BOT_TOKEN`
 - **Admin ID**: `970377911`
 - **Имя бота**: @MoriMarketBot
 - **База данных**: SQLite в папке `data/`

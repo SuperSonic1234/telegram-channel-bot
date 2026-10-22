@@ -15,7 +15,7 @@
 
    ssh -p 58595 root@132.243.194.9
    
-   Пароль: 2baFUY7uBt9cB
+   Пароль: YOUR_SERVER_PASSWORD
 
 -------------------------------------------
 
@@ -39,7 +39,7 @@ pip install -r requirements.txt
 4. Создайте .env файл:
 
 cat > .env << 'ENVEOF'
-BOT_TOKEN=8946911601:AAGBisB9ZAhsY7sYe-ZSc8P8_PEKHN6VOMI
+BOT_TOKEN=YOUR_BOT_TOKEN
 ADMIN_ID=970377911
 DATABASE_PATH=data/bot.db
 ENVEOF
