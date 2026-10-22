@@ -1,0 +1,201 @@
+from utils.rates import get_actual_rates
+
+
+class ChannelPriceCalculator:
+    """Калькулятор стоимости канала с учетом всех комиссий"""
+    
+    @staticmethod
+    async def calculate_channel_price(
+        total_stars: float,
+        profit_percent: float = 30.0
+    ) -> dict:
+        """
+        Рассчитать стоимость канала с учетом всех комиссий
+        
+        Args:
+            total_stars: Общее количество звезд в канале
+            profit_percent: Процент прибыли (по умолчанию 30%)
+        
+        Returns:
+            dict: Детальный расчет с ценами в разных валютах
+        """
+        # Получаем актуальные курсы
+        rates = await get_actual_rates()
+        
+        gram_to_rub = rates['gram_to_rub']
+        stars_to_gram = rates['stars_to_gram']
+        telegram_fee = rates['telegram_withdrawal_fee']
+        fragment_fee = rates['fragment_conversion_fee']
+        
+        # Шаг 1: Вывод с канала Telegram (минус комиссия Telegram)
+        stars_after_telegram = total_stars * (1 - telegram_fee / 100)
+        
+        # Шаг 2: Конвертация Stars → GRAM через Fragment (минус комиссия Fragment)
+        stars_after_fragment = stars_after_telegram * (1 - fragment_fee / 100)
+        gram_amount = stars_after_fragment * stars_to_gram
+        
+        # Шаг 3: Конвертация GRAM → RUB
+        rub_amount = gram_amount * gram_to_rub
+        
+        # Шаг 4: Вычитаем процент прибыли
+        final_price_rub = rub_amount * (1 - profit_percent / 100)
+        
+        # Рассчитываем цены в других валютах
+        final_price_gram = final_price_rub / gram_to_rub
+        final_price_stars = final_price_gram / stars_to_gram
+        
+        return {
+            # Исходные данные
+            'initial_stars': total_stars,
+            'profit_percent': profit_percent,
+            
+            # Комиссии
+            'telegram_fee_percent': telegram_fee,
+            'fragment_fee_percent': fragment_fee,
+            
+            # Промежуточные расчеты
+            'stars_after_telegram': stars_after_telegram,
+            'stars_after_fragment': stars_after_fragment,
+            'gram_after_conversion': gram_amount,
+            'rub_after_conversion': rub_amount,
+            
+            # Итоговые цены (после вычета прибыли)
+            'final_price_rub': round(final_price_rub, 2),
+            'final_price_gram': round(final_price_gram, 4),
+            'final_price_stars': round(final_price_stars, 2),
+            
+            # Курсы
+            'gram_to_rub_rate': gram_to_rub,
+            'stars_to_gram_rate': stars_to_gram,
+        }
+    
+    @staticmethod
+    async def calculate_net_amount(total_stars: float) -> dict:
+        """
+        Рассчитать чистую сумму после вывода (без вычета прибыли)
+        Используется в калькуляторе админки
+        
+        Args:
+            total_stars: Количество звезд
+        
+        Returns:
+            dict: Чистые суммы в разных валютах
+        """
+        rates = await get_actual_rates()
+        
+        gram_to_rub = rates['gram_to_rub']
+        stars_to_gram = rates['stars_to_gram']
+        telegram_fee = rates['telegram_withdrawal_fee']
+        fragment_fee = rates['fragment_conversion_fee']
+        
+        # Вывод с канала
+        stars_after_telegram = total_stars * (1 - telegram_fee / 100)
+        
+        # Конвертация через Fragment
+        stars_after_fragment = stars_after_telegram * (1 - fragment_fee / 100)
+        gram_amount = stars_after_fragment * stars_to_gram
+        
+        # Конвертация в рубли
+        rub_amount = gram_amount * gram_to_rub
+        
+        return {
+            'initial_stars': total_stars,
+            'telegram_fee_percent': telegram_fee,
+            'fragment_fee_percent': fragment_fee,
+            'stars_after_telegram': round(stars_after_telegram, 2),
+            'stars_after_fragment': round(stars_after_fragment, 2),
+            'net_gram': round(gram_amount, 4),
+            'net_rub': round(rub_amount, 2),
+            'gram_to_rub_rate': gram_to_rub,
+            'stars_to_gram_rate': stars_to_gram,
+        }
+    
+    @staticmethod
+    def format_price_message(calculation: dict) -> str:
+        """
+        Форматировать сообщение с расчетом цены
+        
+        Args:
+            calculation: Результат расчета из calculate_channel_price
+        
+        Returns:
+            str: Отформатированное сообщение
+        """
+        return f"""
+💰 <b>Расчет стоимости канала</b>
+
+📊 <b>Исходные данные:</b>
+├─ Баланс канала: <code>{calculation['initial_stars']:,.0f}</code> Stars
+
+🔄 <b>Этап 1: Вывод с канала Telegram</b>
+├─ Комиссия Telegram: <code>{calculation['telegram_fee_percent']}%</code>
+└─ После вывода: <code>{calculation['stars_after_telegram']:,.2f}</code> Stars
+
+💎 <b>Этап 2: Конвертация через Fragment</b>
+├─ Комиссия Fragment: <code>{calculation['fragment_fee_percent']}%</code>
+└─ Доступно для конвертации: <code>{calculation['stars_after_fragment']:,.2f}</code> Stars
+
+🌟 <b>Этап 3: Конвертация Stars → GRAM</b>
+├─ Курс: <code>1 Star = {calculation['stars_to_gram_rate']} GRAM</code>
+└─ Получено: <code>{calculation['gram_after_conversion']:.4f}</code> GRAM
+
+💵 <b>Этап 4: Конвертация GRAM → RUB</b>
+├─ Курс: <code>1 GRAM = {calculation['gram_to_rub_rate']:.2f} RUB</code>
+└─ Получено: <code>{calculation['rub_after_conversion']:.2f}</code> RUB
+
+💸 <b>Этап 5: Вычет комиссии ({calculation['profit_percent']}%)</b>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<b>🎯 ИТОГОВАЯ ЦЕНА ВЫКУПА:</b>
+
+💵 <code>{calculation['final_price_rub']:,.2f}</code> RUB
+💎 <code>{calculation['final_price_gram']:.4f}</code> GRAM
+⭐ <code>{calculation['final_price_stars']:,.0f}</code> Stars
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+    
+    @staticmethod
+    def format_calculator_message(calculation: dict) -> str:
+        """
+        Форматировать сообщение калькулятора (без вычета прибыли)
+        
+        Args:
+            calculation: Результат расчета из calculate_net_amount
+        
+        Returns:
+            str: Отформатированное сообщение
+        """
+        return f"""
+🧮 <b>Калькулятор выплат</b>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💫 <b>Исходная сумма:</b> <code>{calculation['initial_stars']:,.0f}</code> Stars
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 <b>Этап 1: Вывод с канала Telegram</b>
+├─ Комиссия: <code>-{calculation['telegram_fee_percent']}%</code>
+└─ Остаток: <code>{calculation['stars_after_telegram']:,.2f}</code> Stars
+
+💎 <b>Этап 2: Конвертация через Fragment</b>
+├─ Комиссия: <code>-{calculation['fragment_fee_percent']}%</code>
+└─ К конвертации: <code>{calculation['stars_after_fragment']:,.2f}</code> Stars
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<b>💰 ЧИСТАЯ СУММА (после всех комиссий):</b>
+
+💎 <code>{calculation['net_gram']:.4f}</code> GRAM
+💵 <code>{calculation['net_rub']:,.2f}</code> RUB
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 <b>Текущие курсы:</b>
+├─ 1 Star = <code>{calculation['stars_to_gram_rate']}</code> GRAM
+└─ 1 GRAM = <code>{calculation['gram_to_rub_rate']:.2f}</code> RUB
+
+<i>💡 Курс TON обновляется автоматически</i>
+"""
