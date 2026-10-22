@@ -1,0 +1,131 @@
+===========================================
+🚀 КОМАНДЫ ДЛЯ ПУША БОТА НА СЕРВЕР
+===========================================
+
+📌 ТЕКУЩИЙ СТАТУС:
+✅ Git репозиторий создан локально
+✅ Все файлы закоммичены (коммит: 3aa7c6f)
+✅ .gitignore настроен
+✅ .env.example создан
+
+===========================================
+ШАГ 1: СОЗДАЙТЕ РЕПОЗИТОРИЙ
+===========================================
+
+Перейдите на один из сервисов:
+• GitHub: https://github.com/new
+• GitLab: https://gitlab.com/projects/new
+
+Настройки:
+• Название: telegram-channel-bot (или любое другое)
+• Приватность: Private (рекомендуется)
+• НЕ создавайте README, .gitignore, license
+
+===========================================
+ШАГ 2: ПОДКЛЮЧИТЕ УДАЛЕННЫЙ РЕПОЗИТОРИЙ
+===========================================
+
+В терминале выполните (замените URL):
+
+cd "c:\Users\SystemX\Desktop\Бот скупка каналов"
+
+# Для GitHub:
+git remote add origin https://github.com/ВАШ-USERNAME/telegram-channel-bot.git
+
+# ИЛИ для GitLab:
+git remote add origin https://gitlab.com/ВАШ-USERNAME/telegram-channel-bot.git
+
+# Переименуйте ветку в main
+git branch -M main
+
+# Запушьте код
+git push -u origin main
+
+===========================================
+ШАГ 3: НА СЕРВЕРЕ
+===========================================
+
+Подключитесь к серверу:
+ssh user@your-server.com
+
+Клонируйте репозиторий:
+cd ~
+git clone https://github.com/ВАШ-USERNAME/telegram-channel-bot.git
+cd telegram-channel-bot
+
+Настройте:
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+Создайте .env:
+cp .env.example .env
+nano .env
+# Заполните: BOT_TOKEN, ADMIN_ID
+# Сохраните: Ctrl+O, Enter, Ctrl+X
+
+Создайте папку БД:
+mkdir -p data
+
+Запустите:
+python bot.py
+
+===========================================
+АВТОЗАПУСК (systemd)
+===========================================
+
+sudo nano /etc/systemd/system/telegram-bot.service
+
+Вставьте (замените your-username на ваше имя пользователя):
+
+[Unit]
+Description=Telegram Channel Bot
+After=network.target
+
+[Service]
+Type=simple
+User=your-username
+WorkingDirectory=/home/your-username/telegram-channel-bot
+Environment="PATH=/home/your-username/telegram-channel-bot/.venv/bin"
+ExecStart=/home/your-username/telegram-channel-bot/.venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+Активируйте:
+sudo systemctl daemon-reload
+sudo systemctl enable telegram-bot
+sudo systemctl start telegram-bot
+sudo systemctl status telegram-bot
+
+===========================================
+ПОЛЕЗНЫЕ КОМАНДЫ
+===========================================
+
+# Статус бота
+sudo systemctl status telegram-bot
+
+# Логи в реальном времени
+sudo journalctl -u telegram-bot -f
+
+# Перезапуск
+sudo systemctl restart telegram-bot
+
+# Остановка
+sudo systemctl stop telegram-bot
+
+# Обновление бота
+cd ~/telegram-channel-bot
+sudo systemctl stop telegram-bot
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl start telegram-bot
+
+===========================================
+ГОТОВО!
+===========================================
+
+Подробная инструкция: DEPLOY_GIT.md
