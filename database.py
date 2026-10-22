@@ -72,6 +72,23 @@ class Database:
                 )
             """)
 
+            # Таблица выплат
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS payments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id INTEGER,
+                    user_id INTEGER,
+                    payment_details TEXT,
+                    amount REAL,
+                    currency TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMP,
+                    FOREIGN KEY (request_id) REFERENCES sale_requests (id),
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+
             # Таблица настроек бота
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS bot_settings (
@@ -307,7 +324,7 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
-                SELECT 
+                SELECT
                     p.id,
                     p.request_id,
                     p.user_id,
@@ -318,7 +335,7 @@ class Database:
                     r.channel_link,
                     r.created_at
                 FROM payments p
-                JOIN requests r ON p.request_id = r.id
+                JOIN sale_requests r ON p.request_id = r.id
                 WHERE p.status = 'pending'
                 ORDER BY p.created_at DESC
             """) as cursor:
