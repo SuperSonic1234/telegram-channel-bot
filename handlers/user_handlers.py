@@ -6,6 +6,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
+from config import ADMIN_ID
 from database import Database
 from utils.keyboards import main_menu_kb, back_to_main_kb
 
@@ -26,9 +27,11 @@ async def cmd_start(message: Message, state: FSMContext):
     if not welcome_msg:
         welcome_msg = "Добро пожаловать в бот скупки каналов! 👋"
 
+    is_admin = message.from_user.id == ADMIN_ID
+
     await message.answer(
         welcome_msg,
-        reply_markup=main_menu_kb()
+        reply_markup=main_menu_kb(is_admin=is_admin)
     )
 
 
@@ -50,7 +53,9 @@ async def show_profile(message: Message):
 💰 Заработано: {user['total_earned']:.2f} RUB
 """
 
-    await message.answer(profile_text, reply_markup=main_menu_kb())
+    is_admin = message.from_user.id == ADMIN_ID
+
+    await message.answer(profile_text, reply_markup=main_menu_kb(is_admin=is_admin))
 
 
 @router.callback_query(F.data == "back_to_main")
@@ -62,6 +67,19 @@ async def back_to_main(callback: CallbackQuery, state: FSMContext):
     if not welcome_msg:
         welcome_msg = "Добро пожаловать в бот скупки каналов! 👋"
 
+    is_admin = callback.from_user.id == ADMIN_ID
+
     await callback.message.edit_text(welcome_msg)
-    await callback.message.answer("Выберите действие:", reply_markup=main_menu_kb())
+    await callback.message.answer("Выберите действие:", reply_markup=main_menu_kb(is_admin=is_admin))
     await callback.answer()
+
+
+@router.message(F.text == "🛠 Панель администратора")
+async def admin_button(message: Message):
+    """Обработка кнопки админ-панели"""
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет доступа к этой функции")
+        return
+
+    from admin.admin_handlers import show_admin_panel
+    await show_admin_panel(message)

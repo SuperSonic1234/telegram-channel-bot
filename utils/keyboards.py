@@ -5,12 +5,17 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 
 
 # === Главное меню ===
-def main_menu_kb():
+def main_menu_kb(is_admin=False):
+    keyboard_layout = [
+        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="💬 Поддержка")],
+        [KeyboardButton(text="💰 Продать канал")]
+    ]
+
+    if is_admin:
+        keyboard_layout.append([KeyboardButton(text="🛠 Панель администратора")])
+
     keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="💬 Поддержка")],
-            [KeyboardButton(text="💰 Продать канал")]
-        ],
+        keyboard=keyboard_layout,
         resize_keyboard=True
     )
     return keyboard

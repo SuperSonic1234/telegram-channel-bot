@@ -1,0 +1,144 @@
+===========================================
+📋 ПОШАГОВАЯ ИНСТРУКЦИЯ ДЛЯ ДЕПЛОЯ
+===========================================
+
+✅ ШАГ 1-3 ВЫПОЛНЕНЫ:
+  ✓ Репозиторий создан на GitHub
+  ✓ Код запушен (43 файла, 3 коммита)
+  ✓ Репозиторий: https://github.com/SuperSonic1234/telegram-channel-bot
+
+===========================================
+🖥️  ТЕПЕРЬ ВЫПОЛНИТЕ НА СЕРВЕРЕ:
+===========================================
+
+1. Подключитесь к серверу через SSH:
+
+   ssh -p 58595 root@132.243.194.9
+   
+   Пароль: 2baFUY7uBt9cB
+
+-------------------------------------------
+
+2. Клонируйте репозиторий:
+
+cd /root
+git clone https://github.com/SuperSonic1234/telegram-channel-bot.git
+cd telegram-channel-bot
+
+-------------------------------------------
+
+3. Создайте виртуальное окружение и установите зависимости:
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+-------------------------------------------
+
+4. Создайте .env файл:
+
+cat > .env << 'ENVEOF'
+BOT_TOKEN=8946911601:AAGBisB9ZAhsY7sYe-ZSc8P8_PEKHN6VOMI
+ADMIN_ID=970377911
+DATABASE_PATH=data/bot.db
+ENVEOF
+
+chmod 600 .env
+mkdir -p data
+
+-------------------------------------------
+
+5. Проверьте что бот запускается:
+
+python bot.py
+
+Должно появиться:
+  INFO - Бот запущен!
+  INFO - Start polling
+  
+Если всё ок, нажмите Ctrl+C
+
+-------------------------------------------
+
+6. Настройте автозапуск через systemd:
+
+cat > /etc/systemd/system/telegram-bot.service << 'SERVICEEOF'
+[Unit]
+Description=Telegram Channel Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/telegram-channel-bot
+Environment="PATH=/root/telegram-channel-bot/.venv/bin"
+ExecStart=/root/telegram-channel-bot/.venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+-------------------------------------------
+
+7. Запустите сервис:
+
+systemctl daemon-reload
+systemctl enable telegram-bot
+systemctl start telegram-bot
+
+-------------------------------------------
+
+8. Проверьте статус:
+
+systemctl status telegram-bot
+
+Должно быть: Active: active (running)
+
+-------------------------------------------
+
+9. Посмотрите логи:
+
+journalctl -u telegram-bot -f
+
+Нажмите Ctrl+C для выхода
+
+===========================================
+✅ ГОТОВО! БОТ РАБОТАЕТ!
+===========================================
+
+📊 ПОЛЕЗНЫЕ КОМАНДЫ:
+
+# Статус бота
+systemctl status telegram-bot
+
+# Перезапуск
+systemctl restart telegram-bot
+
+# Остановка
+systemctl stop telegram-bot
+
+# Логи в реальном времени
+journalctl -u telegram-bot -f
+
+# Последние 100 строк логов
+journalctl -u telegram-bot -n 100
+
+# Обновление бота (после изменений в коде)
+cd /root/telegram-channel-bot
+systemctl stop telegram-bot
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+systemctl start telegram-bot
+
+===========================================
+🔗 ССЫЛКИ:
+
+Репозиторий: https://github.com/SuperSonic1234/telegram-channel-bot
+Сервер: 132.243.194.9:58595
+Бот: @MoriMarketBot
+
+===========================================

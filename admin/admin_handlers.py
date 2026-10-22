@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from config import ADMIN_ID
 from database import Database
 from utils.keyboards import (
     admin_panel_kb, admin_history_kb, back_to_admin_kb,
@@ -29,13 +30,8 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 
-@router.message(Command("admin"))
-async def admin_panel(message: Message):
-    """Открыть админ-панель"""
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ У вас нет доступа к админ-панели.")
-        return
-
+async def show_admin_panel(message: Message):
+    """Показать админ-панель (для вызова из обработчика кнопки)"""
     text = """
 ⚙️ <b>Админ-панель</b>
 
@@ -46,9 +42,19 @@ async def admin_panel(message: Message):
     await message.answer(text, reply_markup=admin_panel_kb())
 
 
+@router.message(Command("admin"))
+async def admin_panel(message: Message):
+    """Открыть админ-панель"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к админ-панели.")
+        return
+
+    await show_admin_panel(message)
+
+
 @router.callback_query(F.data == "admin_panel")
-async def show_admin_panel(callback: CallbackQuery):
-    """Показать админ-панель"""
+async def show_admin_panel_callback(callback: CallbackQuery):
+    """Показать админ-панель (из callback)"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
