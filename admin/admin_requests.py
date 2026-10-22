@@ -37,23 +37,72 @@ async def show_requests(callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
     else:
         text += f"Всего заявок: {len(requests)}\n\n"
+        text += "<i>Выберите заявку для работы с ней:</i>"
 
+        # Создаем клавиатуру с кнопками заявок
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard = []
         for req in requests[:10]:
-            text += f"📋 Заявка #{req['id']}\n"
-            text += f"👤 @{req['username']} (ID: <code>{req['user_id']}</code>)\n"
-            text += f"🔗 Канал: {req['channel_link']}\n"
-            text += f"💰 Баланс: {req['total_balance']} Stars\n"
-            text += f"💵 Цена: {req['calculated_price_rub']} RUB\n"
-            text += f"💳 Оплата: {req['payment_method'] or 'не выбрано'}\n"
-            text += f"📅 {req['created_at']}\n"
-            text += "─" * 30 + "\n\n"
+            button_text = f"#{req['id']} - @{req['username']} - {req['calculated_price_rub']} RUB"
+            keyboard.append([InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"view_request:{req['id']}"
+            )])
 
-        if len(requests) > 10:
-            text += f"\n... и еще {len(requests) - 10} заявок"
+        keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
 
-        text += "\n<i>Для работы с заявкой используйте кнопки под сообщением с деталями заявки</i>"
+        await callback.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
 
-        await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("view_request:"))
+async def view_request_details(callback: CallbackQuery):
+    """Показать детали заявки с кнопками действий"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    request_id = int(callback.data.split(":")[1])
+
+    # Получаем заявку
+    request = await db.get_sale_request(request_id)
+
+    if not request:
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
+        return
+
+    # Формируем детальное описание
+    text = f"""
+📋 <b>Заявка #{request['id']}</b>
+
+👤 <b>Пользователь:</b> @{request['username']}
+🆔 <b>ID:</b> <code>{request['user_id']}</code>
+🔗 <b>Канал:</b> {request['channel_link']}
+
+💰 <b>Баланс канала:</b>
+   • Общий баланс: {request['total_balance']} Stars
+   • Доступно к выводу: {request['available_balance']} Stars
+   • В холде: {request['hold_balance']} Stars
+
+💵 <b>Расчетная стоимость:</b>
+   • RUB: {request['calculated_price_rub']}
+   • GRAM: {request['calculated_price_gram']}
+   • Stars: {request['calculated_price_stars']}
+
+💳 <b>Метод оплаты:</b> {request['payment_method'].upper() if request['payment_method'] else 'не выбрано'}
+📅 <b>Создана:</b> {request['created_at']}
+"""
+
+    # Показываем с кнопками действий
+    await callback.message.edit_text(
+        text,
+        reply_markup=request_action_kb(request_id)
+    )
 
     await callback.answer()
 
@@ -108,7 +157,8 @@ async def approve_request(callback: CallbackQuery, bot: Bot):
         # Обновляем сообщение админа
         await callback.message.edit_text(
             f"✅ Заявка #{request_id} одобрена!\n\n"
-            f"Пользователь @{request['username']} уведомлен."
+            f"Пользователь @{request['username']} уведомлен.",
+            reply_markup=back_to_admin_kb()
         )
 
         # Добавляем в историю покупок
@@ -198,7 +248,8 @@ async def reject_request(callback: CallbackQuery, bot: Bot):
         await callback.message.edit_text(
             f"❌ Заявка #{request_id} отклонена!\n\n"
             f"Причина: {reason_text}\n"
-            f"Пользователь @{request['username']} уведомлен."
+            f"Пользователь @{request['username']} уведомлен.",
+            reply_markup=back_to_admin_kb()
         )
 
         # Добавляем в историю
@@ -261,7 +312,8 @@ async def payout_completed(callback: CallbackQuery, bot: Bot):
         await callback.message.edit_text(
             f"✅ Выплата по заявке #{request_id} выполнена!\n\n"
             f"Пользователь @{request['username']} уведомлен.\n"
-            f"Сумма: {request['calculated_price_' + request['payment_method']]} {request['payment_method'].upper()}"
+            f"Сумма: {request['calculated_price_' + request['payment_method']]} {request['payment_method'].upper()}",
+            reply_markup=back_to_admin_kb()
         )
 
     except Exception as e:
@@ -294,4 +346,87 @@ async def payout_rejected(callback: CallbackQuery, bot: Bot):
 """
 
     await callback.message.edit_text(text, reply_markup=reject_reason_kb(request_id))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_payments")
+async def show_payments(callback: CallbackQuery):
+    """Показать заявки на выплату"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    # Получаем одобренные заявки с реквизитами
+    payments = await db.get_payments_pending()
+
+    text = "💳 <b>Заявки на выплату</b>\n\n"
+
+    if not payments:
+        text += "Нет заявок на выплату."
+        await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    else:
+        text += f"Всего заявок: {len(payments)}\n\n"
+        text += "<i>Выберите заявку для работы с ней:</i>"
+
+        # Создаем клавиатуру с кнопками заявок
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard = []
+        for payment in payments[:10]:
+            button_text = f"#{payment['id']} - @{payment['username']} - {payment['amount']} {payment['currency'].upper()}"
+            keyboard.append([InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"view_payment:{payment['request_id']}"
+            )])
+
+        keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("view_payment:"))
+async def view_payment_details(callback: CallbackQuery):
+    """Показать детали заявки на выплату"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    request_id = int(callback.data.split(":")[1])
+
+    # Получаем заявку и платеж
+    request = await db.get_sale_request(request_id)
+    payment = await db.get_payment_by_request(request_id)
+
+    if not request or not payment:
+        await callback.answer("❌ Заявка не найдена", show_alert=True)
+        return
+
+    # Формируем детальное описание
+    text = f"""
+💳 <b>Заявка на выплату #{request['id']}</b>
+
+👤 <b>Пользователь:</b> @{request['username']}
+🆔 <b>ID:</b> <code>{request['user_id']}</code>
+🔗 <b>Канал:</b> {request['channel_link']}
+
+💰 <b>Сумма выплаты:</b>
+{payment['amount']} {payment['currency'].upper()}
+
+📝 <b>Реквизиты:</b>
+{payment['payment_details']}
+
+📅 <b>Создана:</b> {request['created_at']}
+"""
+
+    # Показываем с кнопками действий
+    await callback.message.edit_text(
+        text,
+        reply_markup=payment_action_kb(request_id)
+    )
+
     await callback.answer()

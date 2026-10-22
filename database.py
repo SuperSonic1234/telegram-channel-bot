@@ -301,3 +301,35 @@ class Database:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM users") as cursor:
                 return await cursor.fetchall()
+
+    async def get_payments_pending(self):
+        """Получить заявки на выплату (одобренные, но не выплаченные)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT 
+                    p.id,
+                    p.request_id,
+                    p.user_id,
+                    p.payment_details,
+                    p.amount,
+                    p.currency,
+                    r.username,
+                    r.channel_link,
+                    r.created_at
+                FROM payments p
+                JOIN requests r ON p.request_id = r.id
+                WHERE p.status = 'pending'
+                ORDER BY p.created_at DESC
+            """) as cursor:
+                return await cursor.fetchall()
+
+    async def get_payment_by_request(self, request_id):
+        """Получить информацию о выплате по заявке"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM payments
+                WHERE request_id = ?
+            """, (request_id,)) as cursor:
+                return await cursor.fetchone()

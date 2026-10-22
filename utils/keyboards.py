@@ -69,6 +69,7 @@ def admin_panel_kb():
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="📋 Заявки", callback_data="admin_requests")],
+        [InlineKeyboardButton(text="💳 Выплаты", callback_data="admin_payments")],
         [InlineKeyboardButton(text="💬 Обращения", callback_data="admin_support")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📜 История скупки", callback_data="admin_history")],
