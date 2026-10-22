@@ -331,6 +331,17 @@ async def process_payment_details(message: Message, state: FSMContext, bot: Bot)
         await state.clear()
         return
 
+    # Получаем данные заявки
+    request = await db.get_sale_request(request_id)
+
+    if not request:
+        await message.answer(
+            "❌ Произошла ошибка. Заявка не найдена.",
+            reply_markup=main_menu_kb()
+        )
+        await state.clear()
+        return
+
     # Обновляем заявку
     await db.update_sale_request(
         request_id,
@@ -338,8 +349,15 @@ async def process_payment_details(message: Message, state: FSMContext, bot: Bot)
         status='awaiting_payout'
     )
 
-    # Получаем данные заявки
-    request = await db.get_sale_request(request_id)
+    # Создаем запись о выплате
+    amount = request['calculated_price_' + request['payment_method']]
+    await db.create_payment(
+        request_id,
+        message.from_user.id,
+        payment_details,
+        amount,
+        request['payment_method']
+    )
 
     # Отправляем админу заявку на выплату
     admin_text = f"""

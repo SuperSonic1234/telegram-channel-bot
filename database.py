@@ -350,3 +350,15 @@ class Database:
                 WHERE request_id = ?
             """, (request_id,)) as cursor:
                 return await cursor.fetchone()
+
+    async def create_payment(self, request_id: int, user_id: int,
+                           payment_details: str, amount: float, currency: str):
+        """Создать запись о выплате"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO payments
+                (request_id, user_id, payment_details, amount, currency, status)
+                VALUES (?, ?, ?, ?, ?, 'pending')
+            """, (request_id, user_id, payment_details, amount, currency))
+            await db.commit()
+            return cursor.lastrowid
