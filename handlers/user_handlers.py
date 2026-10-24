@@ -27,14 +27,16 @@ async def send_welcome(target: Message, bot: Bot, is_admin: bool) -> None:
                 reply_markup=main_menu_inline_kb(),
             )
             if is_admin:
-                await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
+                admin_message = await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
+                await admin_message.delete()
             return
         except Exception:
             pass
     welcome_msg = await db.get_setting("welcome_message") or "Добро пожаловать в бот скупки каналов! 👋"
     await target.answer(welcome_msg, reply_markup=main_menu_inline_kb())
     if is_admin:
-        await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
+        admin_message = await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
+        await admin_message.delete()
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
@@ -61,10 +63,11 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
 
 @router.message(F.text == "🎁 Реферальная система")
-async def show_referrals(message: Message, bot: Bot):
-    stats = await db.get_referral_stats(message.from_user.id)
+async def show_referrals(message: Message, bot: Bot, user_id: int | None = None):
+    user_id = user_id or message.from_user.id
+    stats = await db.get_referral_stats(user_id)
     bot_user = await bot.get_me()
-    referral_link = f"https://t.me/{bot_user.username}?start=ref_{message.from_user.id}"
+    referral_link = f"https://t.me/{bot_user.username}?start=ref_{user_id}"
     enabled_text = "включена" if stats["enabled"] else "временно отключена"
     remaining = max(stats["threshold"] - (stats["sold"] % stats["threshold"]), 0)
     text = f"""
@@ -86,13 +89,13 @@ async def show_referrals(message: Message, bot: Bot):
 
 @router.callback_query(F.data == "main_referrals")
 async def main_referrals_callback(callback: CallbackQuery, bot: Bot):
-    await show_referrals(callback.message, bot)
+    await show_referrals(callback.message, bot, callback.from_user.id)
     await callback.answer()
 
 
 @router.callback_query(F.data == "main_profile")
 async def main_profile_callback(callback: CallbackQuery):
-    await show_profile(callback.message)
+    await show_profile(callback.message, callback.from_user.id)
     await callback.answer()
 
 @router.callback_query(F.data == "referral_claim")
@@ -121,9 +124,9 @@ async def claim_referral_reward(callback: CallbackQuery, bot: Bot):
 
 
 @router.message(F.text == "👤 Профиль")
-async def show_profile(message: Message):
+async def show_profile(message: Message, user_id: int | None = None):
     """Показать профиль пользователя"""
-    user = await db.get_user(message.from_user.id)
+    user = await db.get_user(user_id or message.from_user.id)
 
     if not user:
         await message.answer("Произошла ошибка. Используйте /start")
@@ -137,8 +140,6 @@ async def show_profile(message: Message):
 📊 Продано каналов: {user['channels_sold']}
 💰 Заработано: {user['total_earned']:.2f} RUB
 """
-
-    is_admin = message.from_user.id == ADMIN_ID
 
     await message.answer(profile_text, reply_markup=main_menu_inline_kb())
 
