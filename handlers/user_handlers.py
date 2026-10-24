@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from config import ADMIN_ID
 from database import Database
-from utils.keyboards import main_menu_inline_kb, referral_kb
+from utils.keyboards import back_to_main_kb, main_menu_inline_kb, referral_kb
 from utils.validation import safe_html
 
 router = Router()
@@ -135,7 +135,7 @@ async def show_profile(message: Message, user_id: int | None = None):
 💰 Заработано: {user['total_earned']:.2f} RUB
 """
 
-    await message.answer(profile_text, reply_markup=main_menu_inline_kb())
+    await message.answer(profile_text, reply_markup=back_to_main_kb())
 
 
 @router.callback_query(F.data == "back_to_main")
