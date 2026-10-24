@@ -62,12 +62,6 @@ async def show_referrals(message: Message, bot: Bot):
     stats = await db.get_referral_stats(message.from_user.id)
     bot_user = await bot.get_me()
     referral_link = f"https://t.me/{bot_user.username}?start=ref_{message.from_user.id}"
-    sold = await db.get_sold_referrals(message.from_user.id)
-    sold_text = "\n".join(
-        f"• @{safe_html(item['username'] or 'без username')} — "
-        f"{item['sale_amount']} {item['sale_currency'].upper()}"
-        for item in sold[:20]
-    ) or "Пока никто из приглашённых не продал канал."
     enabled_text = "включена" if stats["enabled"] else "временно отключена"
     remaining = max(stats["threshold"] - (stats["sold"] % stats["threshold"]), 0)
     text = f"""
@@ -81,10 +75,7 @@ async def show_referrals(message: Message, bot: Bot):
 ✅ Продали канал: <b>{stats['sold']}</b>
 🎯 До следующего NFT: <b>{remaining}</b>
 
-Условия: за каждые <b>{stats['threshold']}</b> приглашённых пользователей, которые продадут канал, вы получаете NFT. Продажа засчитывается после выполнения выплаты.
-
-<b>Кто продал:</b>
-{sold_text}
+Условия: за каждые <b>{stats['threshold']}</b> приглашённых пользователей, которые продадут канал, вы получаете NFT.
 """
     await message.answer(text, reply_markup=referral_kb(stats["can_claim"]))
 
