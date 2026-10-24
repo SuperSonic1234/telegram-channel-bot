@@ -27,14 +27,14 @@ async def send_welcome(target: Message, bot: Bot, is_admin: bool) -> None:
                 reply_markup=main_menu_inline_kb(),
             )
             if is_admin:
-                await target.answer("Выберите действие:", reply_markup=main_menu_kb(is_admin=True))
+                await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
             return
         except Exception:
             pass
     welcome_msg = await db.get_setting("welcome_message") or "Добро пожаловать в бот скупки каналов! 👋"
     await target.answer(welcome_msg, reply_markup=main_menu_inline_kb())
     if is_admin:
-        await target.answer("Выберите действие:", reply_markup=main_menu_kb(is_admin=True))
+        await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
