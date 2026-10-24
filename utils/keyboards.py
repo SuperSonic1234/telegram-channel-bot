@@ -145,8 +145,10 @@ def payment_action_kb(request_id: int):
 def reject_reason_kb(request_id: int):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Не передан канал", callback_data=f"reject_reason:not_transferred:{request_id}")],
-        [InlineKeyboardButton(text="Данные не соответствуют", callback_data=f"reject_reason:wrong_data:{request_id}")],
+        [InlineKeyboardButton(text="Некорректные данные", callback_data=f"reject_reason:wrong_data:{request_id}")],
         [InlineKeyboardButton(text="Блок/запрет", callback_data=f"reject_reason:blocked:{request_id}")],
+        [InlineKeyboardButton(text="Просто отказать", callback_data=f"reject_reason:without_reason:{request_id}")],
+        [InlineKeyboardButton(text="✍️ Указать свою причину", callback_data=f"reject_reason:custom:{request_id}")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_requests")]
     ])
     return keyboard
@@ -165,6 +167,14 @@ def payout_reject_reason_kb(request_id: int):
         [InlineKeyboardButton(
             text="Нарушение условий сделки",
             callback_data=f"payout_reject_reason:terms_violation:{request_id}",
+        )],
+        [InlineKeyboardButton(
+            text="Просто отказать",
+            callback_data=f"payout_reject_reason:without_reason:{request_id}",
+        )],
+        [InlineKeyboardButton(
+            text="✍️ Указать свою причину",
+            callback_data=f"payout_reject_reason:custom:{request_id}",
         )],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_payments")],
     ])

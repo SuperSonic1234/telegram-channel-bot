@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class RequestSearchStates(StatesGroup):
     waiting_request_id = State()
+    waiting_custom_rejection_reason = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -140,6 +141,69 @@ async def process_request_search(message: Message, state: FSMContext):
             f"📝 Реквизиты:\n<code>{safe_html(payment['payment_details'] or '')}</code>"
         )
     await message.answer(text, reply_markup=back_to_admin_kb())
+
+
+@router.message(RequestSearchStates.waiting_custom_rejection_reason)
+async def process_custom_rejection_reason(message: Message, state: FSMContext, bot: Bot):
+    if not is_admin(message.from_user.id):
+        return
+    reason_text = (message.text or "").strip()
+    if not reason_text:
+        await message.answer("❌ Отправьте причину отказа текстом.")
+        return
+
+    data = await state.get_data()
+    request_id = data.get("custom_rejection_request_id")
+    rejection_kind = data.get("custom_rejection_kind")
+    request = await db.get_sale_request(request_id) if request_id else None
+    if not request:
+        await state.clear()
+        await message.answer("❌ Заявка не найдена.", reply_markup=back_to_admin_kb())
+        return
+
+    if rejection_kind == "purchase":
+        if not await db.transition_sale_request(request_id, "rejected", ("pending", "approved")):
+            await state.clear()
+            await message.answer("❌ Заявка уже обработана.", reply_markup=back_to_admin_kb())
+            return
+        await db.update_sale_request(request_id, rejection_reason=reason_text)
+        await db.add_purchase(
+            request_id,
+            request["user_id"],
+            request["username"],
+            request["channel_link"] or "N/A",
+            request[f"calculated_price_{request['payment_method']}"] if request["payment_method"] else 0,
+            request["payment_method"] or "N/A",
+            "rejected",
+        )
+        user_text = (
+            "❌ <b>В покупке канала отказано</b>\n\n"
+            f"<b>Причина:</b> {safe_html(reason_text)}\n\n"
+            f"📋 Номер заявки: <code>{request_id}</code>"
+        )
+        result_text = f"❌ Заявка #{request_id} отклонена.\nПричина: {reason_text}"
+    elif rejection_kind == "payout":
+        if not await db.reject_payout(request_id, reason_text):
+            await state.clear()
+            await message.answer("❌ Выплата уже обработана.", reply_markup=back_to_admin_kb())
+            return
+        user_text = (
+            "❌ <b>В выплате отказано</b>\n\n"
+            f"<b>Причина:</b> {safe_html(reason_text)}\n"
+            f"📋 Номер заявки: <code>{request_id}</code>"
+        )
+        result_text = f"❌ Выплата по заявке #{request_id} отклонена.\nПричина: {reason_text}"
+    else:
+        await state.clear()
+        await message.answer("❌ Некорректный тип отказа.", reply_markup=back_to_admin_kb())
+        return
+
+    try:
+        await bot.send_message(request["user_id"], user_text)
+    except Exception:
+        logger.exception("Не удалось отправить пользователю причину отказа по заявке %s", request_id)
+    await state.clear()
+    await message.answer(result_text, reply_markup=back_to_admin_kb())
 
 
 @router.callback_query(F.data.startswith("view_request:"))
@@ -274,7 +338,7 @@ async def show_reject_reasons(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("reject_reason:"))
-async def reject_request(callback: CallbackQuery, bot: Bot):
+async def reject_request(callback: CallbackQuery, bot: Bot, state: FSMContext):
     if not await _require_admin(callback):
         return
     parts = callback.data.split(":")
@@ -287,10 +351,21 @@ async def reject_request(callback: CallbackQuery, bot: Bot):
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
 
+    if reason_key == "custom":
+        await callback.message.edit_text(
+            f"✍️ Введите свою причину отказа для заявки #{request_id}:",
+            reply_markup=back_to_admin_kb(),
+        )
+        await state.update_data(custom_rejection_request_id=request_id, custom_rejection_kind="purchase")
+        await state.set_state(RequestSearchStates.waiting_custom_rejection_reason)
+        await callback.answer()
+        return
+
     reasons = {
         "not_transferred": "Вы не передали канал в указанные сроки.",
         "wrong_data": "Указанные данные не соответствуют действительности.",
         "blocked": "Канал заблокирован или имеет ограничения.",
+        "without_reason": "Без указания причины.",
     }
     reason_text = reasons.get(reason_key)
     if not reason_text:
@@ -380,7 +455,7 @@ async def payout_rejected(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("payout_reject_reason:"))
-async def payout_reject_reason(callback: CallbackQuery, bot: Bot):
+async def payout_reject_reason(callback: CallbackQuery, bot: Bot, state: FSMContext):
     if not await _require_admin(callback):
         return
     parts = callback.data.split(":")
@@ -392,10 +467,20 @@ async def payout_reject_reason(callback: CallbackQuery, bot: Bot):
     if not request:
         await callback.answer("❌ Заявка не найдена", show_alert=True)
         return
+    if reason_key == "custom":
+        await callback.message.edit_text(
+            f"✍️ Введите свою причину отказа выплаты для заявки #{request_id}:",
+            reply_markup=back_to_admin_kb(),
+        )
+        await state.update_data(custom_rejection_request_id=request_id, custom_rejection_kind="payout")
+        await state.set_state(RequestSearchStates.waiting_custom_rejection_reason)
+        await callback.answer()
+        return
     reasons = {
         "wrong_details": "Указаны некорректные реквизиты.",
         "not_transferred": "Канал не был передан.",
         "terms_violation": "Нарушены условия сделки.",
+        "without_reason": "Без указания причины.",
     }
     reason_text = reasons.get(reason_key)
     if not reason_text or not await db.reject_payout(request_id, reason_text):
