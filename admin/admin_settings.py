@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from config import ADMIN_ID
 from database import Database
-from utils.keyboards import admin_settings_kb, back_to_admin_kb
+from utils.keyboards import admin_settings_kb, back_to_admin_kb, rates_settings_kb
 from utils.validation import parse_finite_number, safe_html
 
 router = Router()
@@ -18,6 +18,7 @@ db = Database()
 class SettingsStates(StatesGroup):
     waiting_welcome = State()
     waiting_commission = State()
+    waiting_minimum_sale_balance = State()
     waiting_support_contact = State()
     waiting_gram_rate = State()
     waiting_stars_rate = State()
@@ -51,11 +52,13 @@ async def show_settings(callback: CallbackQuery):
 
 💰 Процент комиссии: <code>{settings_dict.get('commission_percent', '30')}%</code>
 
+📊 Минимальный баланс для продажи: <code>{settings_dict.get('minimum_sale_balance', '0')} Stars</code>
+
 📞 Контакт поддержки: <code>{safe_html(settings_dict.get('support_contact', '@support'))}</code>
 
 💱 Курс GRAM к RUB: <code>{settings_dict.get('gram_to_rub_override') or 'автоматический'}</code>
 
-⭐ Курс Stars к GRAM: <code>{settings_dict.get('stars_to_gram_rate', '0.01')}</code>
+⭐ Курс 1 Star к RUB: <code>{settings_dict.get('stars_to_rub_rate', '1')}</code>
 
 💸 Комиссия вывода звезд: <code>{settings_dict.get('stars_withdrawal_commission', '5')}%</code>
 
@@ -63,6 +66,43 @@ async def show_settings(callback: CallbackQuery):
 """
 
     await callback.message.edit_text(text, reply_markup=admin_settings_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings_rates")
+async def show_rates_settings(callback: CallbackQuery):
+    """Показать настройки курсов валют."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    gram_to_rub = await db.get_setting("gram_to_rub_override") or "автоматический"
+    stars_to_rub = await db.get_setting("stars_to_rub_rate")
+    if not stars_to_rub:
+        legacy_stars_to_gram = await db.get_setting("stars_to_gram_rate") or "0.01"
+        try:
+            stars_to_rub = f"{float(gram_to_rub) * float(legacy_stars_to_gram):.6f}"
+        except (TypeError, ValueError):
+            stars_to_rub = "рассчитывается автоматически"
+
+    try:
+        star_to_gram = float(stars_to_rub) / float(gram_to_rub)
+        star_to_gram_text = f"{star_to_gram:.8f}"
+    except (TypeError, ValueError):
+        star_to_gram_text = "рассчитывается автоматически"
+
+    text = f"""
+💱 <b>Курсы Stars / GRAM / RUB</b>
+
+Текущие значения:
+💵 1 GRAM = <code>{safe_html(gram_to_rub)}</code> RUB
+💰 1 Star = <code>{safe_html(stars_to_rub)}</code> RUB
+⭐ 1 Star = <code>{star_to_gram_text}</code> GRAM (расчётный)
+
+Введите курсы вручную для точного расчёта стоимости канала.
+"""
+
+    await callback.message.edit_text(text, reply_markup=rates_settings_kb())
     await callback.answer()
 
 
@@ -157,6 +197,45 @@ async def save_commission(message: Message, state: FSMContext):
         )
 
 
+@router.callback_query(F.data == "settings_minimum_sale_balance")
+async def edit_minimum_sale_balance(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    current = await db.get_setting('minimum_sale_balance') or '0'
+    text = f"""
+📊 <b>Минимальный баланс для продажи</b>
+
+Текущее значение: <code>{current} Stars</code>
+
+Введите минимальный общий баланс канала в Stars.
+Введите <code>0</code>, чтобы отключить ограничение.
+"""
+    await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    await state.set_state(SettingsStates.waiting_minimum_sale_balance)
+    await callback.answer()
+
+
+@router.message(SettingsStates.waiting_minimum_sale_balance)
+async def save_minimum_sale_balance(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        minimum_sale_balance = parse_finite_number(message.text)
+        if minimum_sale_balance < 0:
+            raise ValueError
+
+        await db.set_setting('minimum_sale_balance', str(minimum_sale_balance))
+        await message.answer(
+            f"✅ Минимальный баланс для продажи обновлен: {minimum_sale_balance:g} Stars",
+            reply_markup=back_to_admin_kb()
+        )
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Введите число не меньше 0.")
+
 @router.callback_query(F.data == "settings_support_contact")
 async def edit_support_contact(callback: CallbackQuery, state: FSMContext):
     """Изменить контакт поддержки"""
@@ -233,7 +312,7 @@ async def save_gram_rate(message: Message, state: FSMContext):
         await db.set_setting('gram_to_rub_override', '')
         await message.answer(
             "✅ Включен автоматический курс TON/RUB.",
-            reply_markup=back_to_admin_kb(),
+            reply_markup=rates_settings_kb(),
         )
         await state.clear()
         return
@@ -247,7 +326,7 @@ async def save_gram_rate(message: Message, state: FSMContext):
 
         await message.answer(
             f"✅ Курс GRAM обновлен: 1 GRAM = {rate} RUB",
-            reply_markup=back_to_admin_kb()
+            reply_markup=rates_settings_kb()
         )
         await state.clear()
 
@@ -259,24 +338,24 @@ async def save_gram_rate(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "settings_stars_rate")
 async def edit_stars_rate(callback: CallbackQuery, state: FSMContext):
-    """Изменить курс Stars к GRAM"""
+    """Изменить курс Stars к RUB"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
 
-    current = await db.get_setting('stars_to_gram_rate') or '0.01'
+    current = await db.get_setting('stars_to_rub_rate') or '1'
 
     text = f"""
-⭐ <b>Изменение курса Stars к GRAM</b>
+⭐ <b>Изменение курса Stars к RUB</b>
 
-Текущее значение: <code>1 Star = {current} GRAM</code>
+Текущее значение: <code>1 Star = {current} RUB</code>
 
-Введите новый курс (например, 0.012):
+Введите стоимость одной звезды в рублях (например, 0.85):
 
-<i>Этот курс используется для конвертации звезд в GRAM при расчете стоимости.</i>
+<i>Этот курс напрямую используется для точного расчёта стоимости канала.</i>
 """
 
-    await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    await callback.message.edit_text(text, reply_markup=rates_settings_kb())
     await state.set_state(SettingsStates.waiting_stars_rate)
     await callback.answer()
 
@@ -292,11 +371,11 @@ async def save_stars_rate(message: Message, state: FSMContext):
         if rate <= 0:
             raise ValueError
 
-        await db.set_setting('stars_to_gram_rate', str(rate))
+        await db.set_setting('stars_to_rub_rate', str(rate))
 
         await message.answer(
-            f"✅ Курс Stars обновлен: 1 Star = {rate} GRAM",
-            reply_markup=back_to_admin_kb()
+            f"✅ Курс Stars обновлен: 1 Star = {rate} RUB",
+            reply_markup=rates_settings_kb()
         )
         await state.clear()
 

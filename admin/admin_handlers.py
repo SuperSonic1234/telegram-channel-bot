@@ -31,6 +31,7 @@ class AdminStates(StatesGroup):
     waiting_broadcast = State()
     waiting_ticket_reply = State()
     waiting_calculator_amount = State()
+    waiting_user_message = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -101,8 +102,82 @@ async def show_users(callback: CallbackQuery):
         if len(users) > 50:
             text += f"\n... и еще {len(users) - 50} пользователей"
 
-    await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    keyboard = [
+        [InlineKeyboardButton(
+            text=f"✉️ Написать: @{user['username'] or user['user_id']}",
+            callback_data=f"message_user:{user['user_id']}",
+        )]
+        for user in users[:50]
+    ]
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+    )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("message_user:"))
+async def start_user_message(callback: CallbackQuery, state: FSMContext):
+    """Запросить у администратора сообщение для конкретного пользователя."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    try:
+        user_id = int(callback.data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        await callback.answer("❌ Некорректный пользователь", show_alert=True)
+        return
+
+    user = await db.get_user(user_id)
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+
+    await state.update_data(target_user_id=user_id)
+    await state.set_state(AdminStates.waiting_user_message)
+    await callback.message.edit_text(
+        f"✉️ <b>Сообщение пользователю</b>\n\n"
+        f"ID: <code>{user_id}</code>\n"
+        f"Username: @{safe_html(user['username'] or 'не указан')}\n\n"
+        "Отправьте следующим сообщением текст, фото, видео, документ или другой файл.\n"
+        "Сообщение будет отправлено пользователю от имени бота.",
+        reply_markup=back_to_admin_kb(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_user_message)
+async def send_user_message(message: Message, state: FSMContext, bot: Bot):
+    """Скопировать сообщение администратора выбранному пользователю."""
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    user_id = data.get("target_user_id")
+    if not user_id:
+        await state.clear()
+        await message.answer("❌ Пользователь не выбран.", reply_markup=back_to_admin_kb())
+        return
+
+    try:
+        await bot.copy_message(
+            chat_id=user_id,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id,
+        )
+    except Exception:
+        await message.answer(
+            "❌ Не удалось отправить сообщение. Пользователь мог заблокировать бота "
+            "или тип сообщения не поддерживается.",
+            reply_markup=back_to_admin_kb(),
+        )
+        await state.clear()
+        return
+
+    await state.clear()
+    await message.answer("✅ Сообщение отправлено пользователю.", reply_markup=back_to_admin_kb())
 
 
 @router.callback_query(F.data == "admin_stats")

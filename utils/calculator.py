@@ -28,7 +28,7 @@ class ChannelPriceCalculator:
         rates = await get_actual_rates()
         
         gram_to_rub = rates['gram_to_rub']
-        stars_to_gram = rates['stars_to_gram']
+        stars_to_rub = rates['stars_to_rub']
         telegram_fee = rates['telegram_withdrawal_fee']
         fragment_fee = rates['fragment_conversion_fee']
         
@@ -37,17 +37,16 @@ class ChannelPriceCalculator:
         
         # Шаг 2: Конвертация Stars → GRAM через Fragment (минус комиссия Fragment)
         stars_after_fragment = stars_after_telegram * (1 - fragment_fee / 100)
-        gram_amount = stars_after_fragment * stars_to_gram
+        rub_amount = stars_after_fragment * stars_to_rub
+        gram_amount = rub_amount / gram_to_rub
         
         # Шаг 3: Конвертация GRAM → RUB
-        rub_amount = gram_amount * gram_to_rub
-        
         # Шаг 4: Вычитаем процент прибыли
         final_price_rub = rub_amount * (1 - profit_percent / 100)
         
         # Рассчитываем цены в других валютах
         final_price_gram = final_price_rub / gram_to_rub
-        final_price_stars = final_price_gram / stars_to_gram
+        final_price_stars = final_price_rub / stars_to_rub
         
         return {
             # Исходные данные
@@ -71,7 +70,8 @@ class ChannelPriceCalculator:
             
             # Курсы
             'gram_to_rub_rate': gram_to_rub,
-            'stars_to_gram_rate': stars_to_gram,
+            'stars_to_rub_rate': stars_to_rub,
+            'stars_to_gram_rate': stars_to_rub / gram_to_rub,
         }
     
     @staticmethod
@@ -91,7 +91,7 @@ class ChannelPriceCalculator:
         rates = await get_actual_rates()
         
         gram_to_rub = rates['gram_to_rub']
-        stars_to_gram = rates['stars_to_gram']
+        stars_to_rub = rates['stars_to_rub']
         telegram_fee = rates['telegram_withdrawal_fee']
         fragment_fee = rates['fragment_conversion_fee']
         
@@ -100,11 +100,10 @@ class ChannelPriceCalculator:
         
         # Конвертация через Fragment
         stars_after_fragment = stars_after_telegram * (1 - fragment_fee / 100)
-        gram_amount = stars_after_fragment * stars_to_gram
+        rub_amount = stars_after_fragment * stars_to_rub
+        gram_amount = rub_amount / gram_to_rub
         
         # Конвертация в рубли
-        rub_amount = gram_amount * gram_to_rub
-        
         return {
             'initial_stars': total_stars,
             'telegram_fee_percent': telegram_fee,
@@ -114,7 +113,8 @@ class ChannelPriceCalculator:
             'net_gram': round(gram_amount, 4),
             'net_rub': round(rub_amount, 2),
             'gram_to_rub_rate': gram_to_rub,
-            'stars_to_gram_rate': stars_to_gram,
+            'stars_to_rub_rate': stars_to_rub,
+            'stars_to_gram_rate': stars_to_rub / gram_to_rub,
         }
     
     @staticmethod
@@ -182,7 +182,7 @@ class ChannelPriceCalculator:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📈 <b>Текущие курсы:</b>
-├─ 1 Star = <code>{calculation['stars_to_gram_rate']}</code> GRAM
+├─ 1 Star = <code>{calculation['stars_to_rub_rate']:.6f}</code> RUB
 └─ 1 GRAM = <code>{calculation['gram_to_rub_rate']:.2f}</code> RUB
 
 <i>💡 Курс TON обновляется автоматически</i>

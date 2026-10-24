@@ -77,12 +77,17 @@ async def get_actual_rates() -> dict[str, float]:
         override = None
 
     ton_to_rub = override or await RatesService.get_ton_to_rub_rate() or fallback_ton
-    stars_to_gram = await _positive_setting(db, "stars_to_gram_rate", 0.01)
+    legacy_stars_to_gram = await _positive_setting(db, "stars_to_gram_rate", 0.01)
+    stars_to_rub = await _positive_setting(db, "stars_to_rub_rate", 0.0)
+    if stars_to_rub <= 0:
+        stars_to_rub = legacy_stars_to_gram * ton_to_rub
+    stars_to_gram = stars_to_rub / ton_to_rub
     withdrawal_fee = await _percent_setting(db, "stars_withdrawal_commission", 5.0)
 
     return {
         "gram_to_rub": ton_to_rub,
         "stars_to_gram": stars_to_gram,
+        "stars_to_rub": stars_to_rub,
         "telegram_withdrawal_fee": withdrawal_fee,
         "fragment_conversion_fee": 5.0,
     }

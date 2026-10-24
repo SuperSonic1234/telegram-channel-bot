@@ -75,6 +75,7 @@ def admin_panel_kb():
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="📋 Заявки", callback_data="admin_requests")],
         [InlineKeyboardButton(text="💳 Выплаты", callback_data="admin_payments")],
+        [InlineKeyboardButton(text="🗂 Архив заявок", callback_data="admin_archive")],
         [InlineKeyboardButton(text="💬 Обращения", callback_data="admin_support")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📜 История скупки", callback_data="admin_history")],
@@ -97,11 +98,20 @@ def admin_settings_kb():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Приветственное сообщение", callback_data="settings_welcome")],
         [InlineKeyboardButton(text="💰 Процент комиссии", callback_data="settings_commission")],
+        [InlineKeyboardButton(text="📊 Минимальный баланс продажи", callback_data="settings_minimum_sale_balance")],
         [InlineKeyboardButton(text="📞 Контакт поддержки", callback_data="settings_support_contact")],
-        [InlineKeyboardButton(text="💱 Курс GRAM к RUB", callback_data="settings_gram_rate")],
-        [InlineKeyboardButton(text="⭐ Курс Stars к GRAM", callback_data="settings_stars_rate")],
+        [InlineKeyboardButton(text="💱 Курсы Stars / GRAM / RUB", callback_data="settings_rates")],
         [InlineKeyboardButton(text="💸 Комиссия вывода звезд", callback_data="settings_withdrawal_fee")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
+    ])
+    return keyboard
+
+
+def rates_settings_kb():
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💱 Курс за 1 GRAM", callback_data="settings_gram_rate")],
+        [InlineKeyboardButton(text="⭐ Курс за 1 Star", callback_data="settings_stars_rate")],
+        [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="admin_settings")]
     ])
     return keyboard
 
@@ -113,6 +123,13 @@ def request_action_kb(request_id: int):
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_requests")]
     ])
     return keyboard
+
+
+def request_archive_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад в архив", callback_data="admin_archive")],
+        [InlineKeyboardButton(text="◀️ В админку", callback_data="admin_panel")],
+    ])
 
 
 def payment_action_kb(request_id: int):

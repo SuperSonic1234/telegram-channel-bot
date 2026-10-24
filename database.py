@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from typing import Any
 
@@ -105,23 +106,35 @@ class Database:
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS request_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    old_status TEXT,
+                    new_status TEXT,
+                    details TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (request_id) REFERENCES sale_requests (id)
+                );
                 """
             )
 
             await self._add_column_if_missing(db, "sale_requests", "channel_link", "TEXT")
+            await self._add_column_if_missing(db, "sale_requests", "calculation_details", "TEXT")
+            await self._add_column_if_missing(db, "sale_requests", "rejection_reason", "TEXT")
             await self._add_column_if_missing(db, "purchase_history", "request_id", "INTEGER")
+            await self._add_column_if_missing(db, "payments", "rejected_at", "TIMESTAMP")
+            await self._add_column_if_missing(db, "payments", "rejection_reason", "TEXT")
 
-            await db.execute(
-                """
-                DELETE FROM payments
-                WHERE id NOT IN (SELECT MAX(id) FROM payments GROUP BY request_id)
-                """
-            )
             await db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_request_id ON payments(request_id)"
             )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sale_requests_status ON sale_requests(status)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_events_request_id ON request_events(request_id)"
             )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status)"
@@ -132,11 +145,13 @@ class Database:
                 [
                     ("welcome_message", "Добро пожаловать в бот скупки каналов! 👋"),
                     ("commission_percent", "30"),
+                    ("minimum_sale_balance", "0"),
                     ("support_contact", "@support"),
                     ("stars_withdrawal_commission", "5"),
                     ("gram_to_rub_rate", "100"),
                     ("gram_to_rub_override", ""),
                     ("stars_to_gram_rate", "0.01"),
+                    ("stars_to_rub_rate", "1"),
                 ],
             )
             await db.commit()
@@ -184,6 +199,7 @@ class Database:
         available_balance: float,
         hold_balance: float,
         prices: dict[str, float],
+        calculation: dict[str, Any] | None = None,
     ) -> int:
         db = await self._connect()
         try:
@@ -191,8 +207,9 @@ class Database:
                 """
                 INSERT INTO sale_requests
                 (user_id, username, channel_link, total_balance, available_balance, hold_balance,
-                 calculated_price_rub, calculated_price_gram, calculated_price_stars, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+                 calculated_price_rub, calculated_price_gram, calculated_price_stars,
+                 calculation_details, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
                 """,
                 (
                     user_id,
@@ -204,17 +221,21 @@ class Database:
                     prices["rub"],
                     prices["gram"],
                     prices["stars"],
+                    json.dumps(calculation or {}, ensure_ascii=False, default=str),
                 ),
             )
             await db.commit()
-            return int(cursor.lastrowid)
+            request_id = int(cursor.lastrowid)
+            await self._add_event(db, request_id, "created", None, "draft", calculation or {})
+            await db.commit()
+            return request_id
         finally:
             await db.close()
 
     async def update_sale_request(self, request_id: int, **kwargs: Any) -> bool:
         if not kwargs:
             return False
-        allowed = {"payment_method", "payment_details", "status", "channel_link"}
+        allowed = {"payment_method", "payment_details", "status", "channel_link", "rejection_reason"}
         unknown = set(kwargs) - allowed
         if unknown:
             raise ValueError(f"Unsupported sale request fields: {', '.join(sorted(unknown))}")
@@ -240,6 +261,8 @@ class Database:
         placeholders = ", ".join("?" for _ in statuses)
         db = await self._connect()
         try:
+            async with db.execute("SELECT status FROM sale_requests WHERE id = ?", (request_id,)) as status_cursor:
+                current = await status_cursor.fetchone()
             cursor = await db.execute(
                 f"""
                 UPDATE sale_requests SET status = ?, updated_at = ?
@@ -248,6 +271,9 @@ class Database:
                 (new_status, utc_now(), request_id, *statuses),
             )
             await db.commit()
+            if cursor.rowcount == 1:
+                await self._add_event(db, request_id, "status_changed", current[0] if current else None, new_status)
+                await db.commit()
             return cursor.rowcount == 1
         finally:
             await db.close()
@@ -269,6 +295,35 @@ class Database:
     async def get_user_requests(self, user_id: int) -> list[aiosqlite.Row]:
         return await self._fetchall(
             "SELECT * FROM sale_requests WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
+        )
+
+    async def get_all_sale_requests(self) -> list[aiosqlite.Row]:
+        return await self._fetchall("SELECT * FROM sale_requests ORDER BY created_at DESC")
+
+    async def get_request_events(self, request_id: int) -> list[aiosqlite.Row]:
+        return await self._fetchall(
+            "SELECT * FROM request_events WHERE request_id = ? ORDER BY created_at ASC, id ASC",
+            (request_id,),
+        )
+
+    async def get_request_bundle(self, request_id: int) -> dict[str, Any] | None:
+        request = await self.get_sale_request(request_id)
+        if not request:
+            return None
+        return {
+            "request": request,
+            "payment": await self.get_payment_by_request(request_id),
+            "events": await self.get_request_events(request_id),
+        }
+
+    async def _add_event(
+        self, db: aiosqlite.Connection, request_id: int, event_type: str,
+        old_status: str | None = None, new_status: str | None = None,
+        details: Any = None,
+    ) -> None:
+        await db.execute(
+            "INSERT INTO request_events (request_id, event_type, old_status, new_status, details) VALUES (?, ?, ?, ?, ?)",
+            (request_id, event_type, old_status, new_status, json.dumps(details or {}, ensure_ascii=False, default=str)),
         )
 
     async def add_purchase(
@@ -421,6 +476,18 @@ class Database:
             """
         )
 
+    async def get_payments_all(self) -> list[aiosqlite.Row]:
+        return await self._fetchall(
+            """
+            SELECT p.id, p.request_id, p.user_id, p.payment_details, p.amount, p.currency,
+                   p.status, p.created_at, p.paid_at, p.rejected_at, p.rejection_reason,
+                   r.username, r.channel_link
+            FROM payments p
+            JOIN sale_requests r ON p.request_id = r.id
+            ORDER BY p.created_at DESC
+            """
+        )
+
     async def get_payment_by_request(self, request_id: int) -> aiosqlite.Row | None:
         db = await self._connect()
         try:
@@ -460,6 +527,11 @@ class Database:
                 "SELECT id FROM payments WHERE request_id = ?", (request_id,)
             ) as cursor:
                 payment_id = (await cursor.fetchone())[0]
+            await db.commit()
+            await self._add_event(
+                db, request_id, "payment_details_submitted", "approved", "awaiting_payout",
+                {"amount": amount, "currency": currency, "payment_details": payment_details},
+            )
             await db.commit()
             return int(payment_id)
         finally:
@@ -510,6 +582,10 @@ class Database:
                 "UPDATE purchase_history SET status = 'bought' WHERE request_id = ?",
                 (request_id,),
             )
+            await self._add_event(
+                db, request_id, "payout_completed", "awaiting_payout", "completed",
+                {"payment_id": payment["id"], "amount": payment["amount"], "currency": payment["currency"]},
+            )
             await db.commit()
             return True
         except Exception:
@@ -518,13 +594,17 @@ class Database:
         finally:
             await db.close()
 
-    async def reject_payout(self, request_id: int) -> bool:
+    async def reject_payout(self, request_id: int, reason: str | None = None) -> bool:
         db = await self._connect()
         try:
             await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute(
-                "UPDATE payments SET status = 'rejected' WHERE request_id = ? AND status = 'pending'",
-                (request_id,),
+                """
+                UPDATE payments
+                SET status = 'rejected', rejected_at = ?, rejection_reason = ?
+                WHERE request_id = ? AND status = 'pending'
+                """,
+                (utc_now(), reason, request_id),
             )
             if cursor.rowcount != 1:
                 await db.rollback()
@@ -539,6 +619,10 @@ class Database:
             if request_cursor.rowcount != 1:
                 await db.rollback()
                 return False
+            await self._add_event(
+                db, request_id, "payout_rejected", "awaiting_payout", "payout_rejected",
+                {"reason": reason or ""},
+            )
             await db.commit()
             return True
         except Exception:

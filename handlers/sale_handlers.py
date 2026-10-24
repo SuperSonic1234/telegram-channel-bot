@@ -153,6 +153,16 @@ async def process_hold_balance(message: Message, state: FSMContext):
         total_balance = data['total_balance']
         available_balance = data['available_balance']
 
+        minimum_sale_balance = float(await db.get_setting('minimum_sale_balance') or 0)
+        if total_balance < minimum_sale_balance:
+            await message.answer(
+                f"Продажа канала недоступна: минимальный баланс для продажи — "
+                f"{minimum_sale_balance:g} Stars.",
+                reply_markup=main_menu_kb()
+            )
+            await state.clear()
+            return
+
         # Проверка: сумма доступного и холда должна соответствовать общему балансу
         if abs((available_balance + hold_balance) - total_balance) > 0.01:
             await message.answer(
@@ -192,12 +202,18 @@ async def process_hold_balance(message: Message, state: FSMContext):
             total_balance,
             available_balance,
             hold_balance,
-            prices
+            prices,
+            calculation,
         )
 
         await state.update_data(
             hold_balance=hold_balance,
             prices=prices,
+            profit={
+                'rub': round(calculation['rub_after_conversion'] - calculation['final_price_rub'], 2),
+                'gram': round(calculation['gram_after_conversion'] - calculation['final_price_gram'], 4),
+                'stars': round(calculation['stars_after_fragment'] - calculation['final_price_stars'], 2),
+            },
             request_id=request_id
         )
 
@@ -228,7 +244,8 @@ async def process_payment_choice(callback: CallbackQuery, state: FSMContext, bot
     data = await state.get_data()
     request_id = data.get('request_id')
     prices = data.get('prices')
-    if not request_id or not prices:
+    profit = data.get('profit')
+    if not request_id or not prices or not profit:
         await callback.answer("❌ Сессия устарела. Начните заново.", show_alert=True)
         await state.clear()
         return
@@ -262,6 +279,11 @@ async def process_payment_choice(callback: CallbackQuery, state: FSMContext, bot
 🪙 {prices['stars']} Stars
 💎 {prices['gram']} GRAM
 💵 {prices['rub']} RUB
+
+💰 <b>Чистая прибыль:</b>
+⭐ {profit['stars']} Stars
+💎 {profit['gram']} GRAM
+💵 {profit['rub']} RUB
 
 💳 <b>Желаемый метод оплаты:</b> {payment_method.upper()}
 

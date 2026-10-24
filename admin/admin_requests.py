@@ -3,7 +3,9 @@
 import logging
 
 from aiogram import Bot, F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import ADMIN_ID
 from database import Database
@@ -13,6 +15,7 @@ from utils.keyboards import (
     payout_reject_reason_kb,
     reject_reason_kb,
     request_action_kb,
+    request_archive_kb,
     send_payment_details_kb,
 )
 from utils.validation import safe_html
@@ -20,6 +23,10 @@ from utils.validation import safe_html
 router = Router()
 db = Database()
 logger = logging.getLogger(__name__)
+
+
+class RequestSearchStates(StatesGroup):
+    waiting_request_id = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -66,6 +73,75 @@ async def show_requests(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin_archive")
+async def show_archive(callback: CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    requests = await db.get_all_sale_requests()
+    text = "🗂 <b>Архив всех заявок</b>\n\n"
+    if not requests:
+        text += "Заявок пока нет."
+        await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    else:
+        keyboard = [
+            [InlineKeyboardButton(
+                text=f"#{request['id']} · {request['status']} · {request['calculated_price_rub']} RUB",
+                callback_data=f"view_request:{request['id']}",
+            )]
+            for request in requests[:30]
+        ]
+        keyboard.insert(0, [InlineKeyboardButton(text="🔎 Найти по номеру", callback_data="search_request")])
+        keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
+        await callback.message.edit_text(
+            text + f"Всего заявок: {len(requests)}\n<i>Последние 30:</i>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "search_request")
+async def search_request(callback: CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await callback.message.edit_text("🔎 Введите номер заявки:", reply_markup=back_to_admin_kb())
+    await state.set_state(RequestSearchStates.waiting_request_id)
+    await callback.answer()
+
+
+@router.message(RequestSearchStates.waiting_request_id)
+async def process_request_search(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        request_id = int((message.text or "").strip())
+    except ValueError:
+        await message.answer("❌ Введите целый номер заявки, например: 123")
+        return
+    request = await db.get_sale_request(request_id)
+    await state.clear()
+    if not request:
+        await message.answer("❌ Заявка с таким номером не найдена.", reply_markup=back_to_admin_kb())
+        return
+    payment = await db.get_payment_by_request(request_id)
+    text = (
+        f"📋 <b>Заявка #{request_id}</b>\n\n"
+        f"👤 @{safe_html(request['username'] or 'unknown')} (<code>{request['user_id']}</code>)\n"
+        f"🔗 {safe_html(request['channel_link'] or 'не указан')}\n"
+        f"📌 Статус: <code>{safe_html(request['status'])}</code>\n"
+        f"💰 Баланс: {request['total_balance']} Stars\n"
+        f"💵 Стоимость: {request['calculated_price_rub']} RUB / "
+        f"{request['calculated_price_gram']} GRAM / {request['calculated_price_stars']} Stars\n"
+        f"📅 Создана: {request['created_at']}\n"
+    )
+    if payment:
+        text += (
+            f"\n💳 Выплата: {payment['amount']} {payment['currency'].upper()}\n"
+            f"📍 Статус: <code>{safe_html(payment['status'])}</code>\n"
+            f"📝 Реквизиты:\n<code>{safe_html(payment['payment_details'] or '')}</code>"
+        )
+    await message.answer(text, reply_markup=back_to_admin_kb())
+
+
 @router.callback_query(F.data.startswith("view_request:"))
 async def view_request_details(callback: CallbackQuery):
     if not await _require_admin(callback):
@@ -79,6 +155,8 @@ async def view_request_details(callback: CallbackQuery):
     channel = safe_html(request["channel_link"] or "не указан")
     username = safe_html(request["username"] or "unknown")
     payment_method = request["payment_method"].upper() if request["payment_method"] else "не выбрано"
+    payment = await db.get_payment_by_request(request_id)
+    events = await db.get_request_events(request_id)
     text = f"""
 📋 <b>Заявка #{request['id']}</b>
 
@@ -98,8 +176,31 @@ async def view_request_details(callback: CallbackQuery):
 
 💳 <b>Метод оплаты:</b> {payment_method}
 📅 <b>Создана:</b> {request['created_at']}
+📌 <b>Статус:</b> <code>{safe_html(request['status'])}</code>
+🕒 <b>Обновлена:</b> {request['updated_at']}
 """
-    await callback.message.edit_text(text, reply_markup=request_action_kb(request_id))
+    if payment:
+        text += (
+            f"\n💳 <b>Выплата:</b> {payment['amount']} {payment['currency'].upper()}"
+            f"\n📍 <b>Статус выплаты:</b> <code>{safe_html(payment['status'])}</code>"
+            f"\n📝 <b>Реквизиты:</b>\n<code>{safe_html(payment['payment_details'] or '')}</code>"
+        )
+        if payment["paid_at"]:
+            text += f"\n✅ <b>Выплачено:</b> {payment['paid_at']}"
+        if payment["rejection_reason"]:
+            text += f"\n❌ <b>Причина отказа:</b> {safe_html(payment['rejection_reason'])}"
+    if events:
+        text += "\n\n🧾 <b>История:</b>"
+        for event in events[-10:]:
+            transition = f" {event['old_status']} → {event['new_status']}" if event['new_status'] else ""
+            text += f"\n• {event['created_at']} — {safe_html(event['event_type'])}{safe_html(transition)}"
+    if request["status"] in {"pending", "approved"}:
+        keyboard = request_action_kb(request_id)
+    elif request["status"] == "awaiting_payout":
+        keyboard = payment_action_kb(request_id)
+    else:
+        keyboard = request_archive_kb()
+    await callback.message.edit_text(text, reply_markup=keyboard)
     await callback.answer()
 
 
@@ -198,6 +299,7 @@ async def reject_request(callback: CallbackQuery, bot: Bot):
     if not await db.transition_sale_request(request_id, "rejected", ("pending", "approved")):
         await callback.answer("❌ Заявка уже обработана", show_alert=True)
         return
+    await db.update_sale_request(request_id, rejection_reason=reason_text)
 
     support_contact = await db.get_setting("support_contact") or "@support"
     await db.add_purchase(
@@ -296,7 +398,7 @@ async def payout_reject_reason(callback: CallbackQuery, bot: Bot):
         "terms_violation": "Нарушены условия сделки.",
     }
     reason_text = reasons.get(reason_key)
-    if not reason_text or not await db.reject_payout(request_id):
+    if not reason_text or not await db.reject_payout(request_id, reason_text):
         await callback.answer("❌ Выплата уже обработана", show_alert=True)
         return
     try:
@@ -318,15 +420,15 @@ async def payout_reject_reason(callback: CallbackQuery, bot: Bot):
 async def show_payments(callback: CallbackQuery):
     if not await _require_admin(callback):
         return
-    payments = await db.get_payments_pending()
-    text = "💳 <b>Заявки на выплату</b>\n\n"
+    payments = await db.get_payments_all()
+    text = "💳 <b>Все выплаты</b>\n\n"
     if not payments:
         await callback.message.edit_text(text + "Нет заявок на выплату.", reply_markup=back_to_admin_kb())
     else:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    text=f"#{p['id']} - @{p['username']} - {p['amount']} {p['currency'].upper()}",
+                    text=f"#{p['id']} - {p['status']} - {p['amount']} {p['currency'].upper()}",
                     callback_data=f"view_payment:{p['request_id']}",
                 )
             ]
@@ -363,6 +465,11 @@ async def view_payment_details(callback: CallbackQuery):
 <code>{safe_html(payment['payment_details'] or '')}</code>
 
 📅 <b>Создана:</b> {payment['created_at']}
+📍 <b>Статус:</b> <code>{safe_html(payment['status'])}</code>
 """
+    if payment["paid_at"]:
+        text += f"\n✅ <b>Выплачено:</b> {payment['paid_at']}"
+    if payment["rejected_at"]:
+        text += f"\n❌ <b>Отклонено:</b> {payment['rejected_at']}\nПричина: {safe_html(payment['rejection_reason'] or '')}"
     await callback.message.edit_text(text, reply_markup=payment_action_kb(request_id))
     await callback.answer()
