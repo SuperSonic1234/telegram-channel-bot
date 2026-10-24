@@ -148,6 +148,7 @@ class Database:
                     ("minimum_sale_balance", "0"),
                     ("support_contact", "@support"),
                     ("stars_withdrawal_commission", "5"),
+                    ("fragment_conversion_commission", "5"),
                     ("gram_to_rub_rate", "100"),
                     ("gram_to_rub_override", ""),
                     ("stars_to_gram_rate", "0.01"),

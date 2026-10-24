@@ -23,6 +23,7 @@ class SettingsStates(StatesGroup):
     waiting_gram_rate = State()
     waiting_stars_rate = State()
     waiting_withdrawal_fee = State()
+    waiting_fragment_fee = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -60,7 +61,9 @@ async def show_settings(callback: CallbackQuery):
 
 ⭐ Курс 1 Star к RUB: <code>{settings_dict.get('stars_to_rub_rate', '1')}</code>
 
-💸 Комиссия вывода звезд: <code>{settings_dict.get('stars_withdrawal_commission', '5')}%</code>
+💸 Комиссия вывода с канала: <code>{settings_dict.get('stars_withdrawal_commission', '5')}%</code>
+
+💎 Комиссия Fragment: <code>{settings_dict.get('fragment_conversion_commission', '5')}%</code>
 
 Выберите параметр для изменения:
 """
@@ -195,6 +198,46 @@ async def save_commission(message: Message, state: FSMContext):
         await message.answer(
             "❌ Пожалуйста, введите корректное число от 0 до 100."
         )
+
+
+@router.callback_query(F.data == "settings_fragment_fee")
+async def edit_fragment_fee(callback: CallbackQuery, state: FSMContext):
+    """Изменить комиссию конвертации Fragment."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    current = await db.get_setting("fragment_conversion_commission") or "5"
+    text = f"""
+💎 <b>Изменение комиссии Fragment</b>
+
+Текущее значение: <code>{current}%</code>
+
+Введите комиссию Fragment от 0 до 100 процентов.
+"""
+    await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
+    await state.set_state(SettingsStates.waiting_fragment_fee)
+    await callback.answer()
+
+
+@router.message(SettingsStates.waiting_fragment_fee)
+async def save_fragment_fee(message: Message, state: FSMContext):
+    """Сохранить комиссию Fragment."""
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        fee = parse_finite_number(message.text)
+        if fee < 0 or fee > 100:
+            raise ValueError
+        await db.set_setting("fragment_conversion_commission", str(fee))
+        await message.answer(
+            f"✅ Комиссия Fragment обновлена: {fee}%",
+            reply_markup=back_to_admin_kb(),
+        )
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректное число от 0 до 100.")
 
 
 @router.callback_query(F.data == "settings_minimum_sale_balance")

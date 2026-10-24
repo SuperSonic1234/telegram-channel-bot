@@ -101,7 +101,8 @@ def admin_settings_kb():
         [InlineKeyboardButton(text="📊 Минимальный баланс продажи", callback_data="settings_minimum_sale_balance")],
         [InlineKeyboardButton(text="📞 Контакт поддержки", callback_data="settings_support_contact")],
         [InlineKeyboardButton(text="💱 Курсы Stars / GRAM / RUB", callback_data="settings_rates")],
-        [InlineKeyboardButton(text="💸 Комиссия вывода звезд", callback_data="settings_withdrawal_fee")],
+        [InlineKeyboardButton(text="💸 Комиссия вывода с канала", callback_data="settings_withdrawal_fee")],
+        [InlineKeyboardButton(text="💎 Комиссия Fragment", callback_data="settings_fragment_fee")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
     ])
     return keyboard

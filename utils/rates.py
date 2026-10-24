@@ -83,11 +83,12 @@ async def get_actual_rates() -> dict[str, float]:
         stars_to_rub = legacy_stars_to_gram * ton_to_rub
     stars_to_gram = stars_to_rub / ton_to_rub
     withdrawal_fee = await _percent_setting(db, "stars_withdrawal_commission", 5.0)
+    fragment_fee = await _percent_setting(db, "fragment_conversion_commission", 5.0)
 
     return {
         "gram_to_rub": ton_to_rub,
         "stars_to_gram": stars_to_gram,
         "stars_to_rub": stars_to_rub,
         "telegram_withdrawal_fee": withdrawal_fee,
-        "fragment_conversion_fee": 5.0,
+        "fragment_conversion_fee": fragment_fee,
     }
