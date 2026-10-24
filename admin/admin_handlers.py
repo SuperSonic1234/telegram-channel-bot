@@ -78,8 +78,6 @@ async def show_admin_panel_callback(callback: CallbackQuery, state: FSMContext):
 
     if callback.message.text is not None:
         await callback.message.edit_text(text, reply_markup=admin_panel_kb())
-    elif callback.message.caption is not None:
-        await callback.message.edit_caption(caption=text, reply_markup=admin_panel_kb())
     else:
         await callback.message.answer(text, reply_markup=admin_panel_kb())
     await callback.answer()
