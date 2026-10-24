@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from config import ADMIN_ID
 from database import Database
-from utils.keyboards import main_menu_kb, referral_kb
+from utils.keyboards import main_menu_inline_kb, main_menu_kb, referral_kb
 from utils.validation import safe_html
 
 router = Router()
@@ -24,14 +24,17 @@ async def send_welcome(target: Message, bot: Bot, is_admin: bool) -> None:
                 chat_id=target.chat.id,
                 from_chat_id=int(source_chat_id),
                 message_id=int(source_message_id),
+                reply_markup=main_menu_inline_kb(),
             )
-            await target.answer("Выберите действие:", reply_markup=main_menu_kb(is_admin=is_admin))
+            if is_admin:
+                await target.answer("Выберите действие:", reply_markup=main_menu_kb(is_admin=True))
             return
         except Exception:
             pass
     welcome_msg = await db.get_setting("welcome_message") or "Добро пожаловать в бот скупки каналов! 👋"
-    await target.answer(welcome_msg, reply_markup=main_menu_kb(is_admin=is_admin))
-
+    await target.answer(welcome_msg, reply_markup=main_menu_inline_kb())
+    if is_admin:
+        await target.answer("Выберите действие:", reply_markup=main_menu_kb(is_admin=True))
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
@@ -80,6 +83,18 @@ async def show_referrals(message: Message, bot: Bot):
     await message.answer(text, reply_markup=referral_kb(stats["can_claim"]))
 
 
+
+@router.callback_query(F.data == "main_referrals")
+async def main_referrals_callback(callback: CallbackQuery, bot: Bot):
+    await show_referrals(callback.message, bot)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "main_profile")
+async def main_profile_callback(callback: CallbackQuery):
+    await show_profile(callback.message)
+    await callback.answer()
+
 @router.callback_query(F.data == "referral_claim")
 async def claim_referral_reward(callback: CallbackQuery, bot: Bot):
     reward = await db.request_referral_reward(callback.from_user.id)
@@ -125,7 +140,7 @@ async def show_profile(message: Message):
 
     is_admin = message.from_user.id == ADMIN_ID
 
-    await message.answer(profile_text, reply_markup=main_menu_kb(is_admin=is_admin))
+    await message.answer(profile_text, reply_markup=main_menu_inline_kb())
 
 
 @router.callback_query(F.data == "back_to_main")

@@ -17,6 +17,12 @@ db = Database()
 logger = logging.getLogger(__name__)
 
 
+
+@router.callback_query(F.data == "main_support")
+async def main_support_callback(callback: CallbackQuery):
+    await support_menu(callback.message)
+    await callback.answer()
+
 class SupportStates(StatesGroup):
     waiting_message = State()
 

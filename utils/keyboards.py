@@ -11,20 +11,23 @@ from aiogram.types import (
 
 # === Главное меню ===
 def main_menu_kb(is_admin=False):
-    keyboard_layout = [
-        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="💬 Поддержка")],
-        [KeyboardButton(text="💰 Продать канал")],
-        [KeyboardButton(text="🎁 Реферальная система")]
-    ]
-
-    if is_admin:
-        keyboard_layout.append([KeyboardButton(text="🛠 Панель администратора")])
-
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=keyboard_layout,
-        resize_keyboard=True
+    if not is_admin:
+        return None
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🛠 Панель администратора")]],
+        resize_keyboard=True,
     )
-    return keyboard
+
+
+def main_menu_inline_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👤 Профиль", callback_data="main_profile"),
+            InlineKeyboardButton(text="💬 Поддержка", callback_data="main_support"),
+        ],
+        [InlineKeyboardButton(text="💰 Продать канал", callback_data="main_sell")],
+        [InlineKeyboardButton(text="🎁 Реферальная система", callback_data="main_referrals")],
+    ])
 
 
 def referral_kb(can_claim: bool):

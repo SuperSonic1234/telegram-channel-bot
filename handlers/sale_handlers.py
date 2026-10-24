@@ -20,6 +20,10 @@ from utils.validation import parse_finite_number, safe_html
 router = Router()
 db = Database()
 logger = logging.getLogger(__name__)
+@router.callback_query(F.data == "main_sell")
+async def main_sell_callback(callback: CallbackQuery, state: FSMContext):
+    await start_sale(callback.message, state)
+    await callback.answer()
 
 
 class SaleStates(StatesGroup):
