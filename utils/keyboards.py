@@ -19,7 +19,7 @@ def main_menu_kb(is_admin=False):
     )
 
 
-def main_menu_inline_kb():
+def main_menu_inline_kb(is_admin=False):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="👤 Профиль", callback_data="main_profile"),
@@ -27,6 +27,7 @@ def main_menu_inline_kb():
         ],
         [InlineKeyboardButton(text="💰 Продать канал", callback_data="main_sell")],
         [InlineKeyboardButton(text="🎁 Реферальная система", callback_data="main_referrals")],
+        *([[InlineKeyboardButton(text="🛠 Панель администратора", callback_data="admin_panel")]] if is_admin else []),
     ])
 
 

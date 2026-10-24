@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from config import ADMIN_ID
 from database import Database
-from utils.keyboards import main_menu_inline_kb, main_menu_kb, referral_kb
+from utils.keyboards import main_menu_inline_kb, referral_kb
 from utils.validation import safe_html
 
 router = Router()
@@ -24,19 +24,13 @@ async def send_welcome(target: Message, bot: Bot, is_admin: bool) -> None:
                 chat_id=target.chat.id,
                 from_chat_id=int(source_chat_id),
                 message_id=int(source_message_id),
-                reply_markup=main_menu_inline_kb(),
+                reply_markup=main_menu_inline_kb(is_admin=is_admin),
             )
-            if is_admin:
-                admin_message = await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
-                await admin_message.delete()
             return
         except Exception:
             pass
     welcome_msg = await db.get_setting("welcome_message") or "Добро пожаловать в бот скупки каналов! 👋"
-    await target.answer(welcome_msg, reply_markup=main_menu_inline_kb())
-    if is_admin:
-        admin_message = await target.answer("\u2063", reply_markup=main_menu_kb(is_admin=True))
-        await admin_message.delete()
+    await target.answer(welcome_msg, reply_markup=main_menu_inline_kb(is_admin=is_admin))
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
