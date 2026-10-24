@@ -13,7 +13,8 @@ from aiogram.types import (
 def main_menu_kb(is_admin=False):
     keyboard_layout = [
         [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="💬 Поддержка")],
-        [KeyboardButton(text="💰 Продать канал")]
+        [KeyboardButton(text="💰 Продать канал")],
+        [KeyboardButton(text="🎁 Реферальная система")]
     ]
 
     if is_admin:
@@ -24,6 +25,31 @@ def main_menu_kb(is_admin=False):
         resize_keyboard=True
     )
     return keyboard
+
+
+def referral_kb(can_claim: bool):
+    buttons = []
+    if can_claim:
+        buttons.append([InlineKeyboardButton(text="🎁 Получить NFT", callback_data="referral_claim")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def referral_reward_kb(reward_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Отправить NFT", callback_data=f"ref_reward_send:{reward_id}")],
+        [InlineKeyboardButton(text="❌ Отказать", callback_data=f"ref_reward_reject:{reward_id}")],
+    ])
+
+
+def admin_referral_kb(enabled: bool):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔴 Выключить" if enabled else "🟢 Включить", callback_data="referral_toggle")],
+        [InlineKeyboardButton(text="⚙️ Изменить порог NFT", callback_data="referral_threshold")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="referral_stats")],
+        [InlineKeyboardButton(text="📋 Заявки на NFT", callback_data="referral_rewards")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")],
+    ])
 
 
 # === Клавиатуры для продажи канала ===
@@ -80,6 +106,7 @@ def admin_panel_kb():
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📜 История скупки", callback_data="admin_history")],
         [InlineKeyboardButton(text="🧮 Калькулятор", callback_data="admin_calculator")],
+        [InlineKeyboardButton(text="🎁 Реферальная система", callback_data="admin_referrals")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings")]
     ])
     return keyboard

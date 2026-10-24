@@ -119,8 +119,10 @@ async def edit_welcome_message(callback: CallbackQuery, state: FSMContext):
     text = """
 💬 <b>Изменение приветственного сообщения</b>
 
-Отправьте новое приветственное сообщение.
-Поддерживается HTML-форматирование.
+Отправьте новое приветственное сообщение любым поддерживаемым типом:
+текст, фото, GIF, видео, документ или другое медиа.
+
+Для текста поддерживается HTML-форматирование.
 
 <i>Пример:</i>
 <code>Добро пожаловать в бот скупки каналов! 👋
@@ -139,10 +141,12 @@ async def save_welcome_message(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
 
-    if not message.text:
-        await message.answer("❌ Отправьте текстовое сообщение.")
+    if not (message.text or message.caption or message.content_type):
+        await message.answer("❌ Отправьте текст, фото, GIF, видео или другой файл.")
         return
-    await db.set_setting('welcome_message', message.text)
+    await db.set_setting('welcome_message', message.text or message.caption or '')
+    await db.set_setting('welcome_message_chat_id', str(message.chat.id))
+    await db.set_setting('welcome_message_id', str(message.message_id))
 
     await message.answer(
         "✅ Приветственное сообщение обновлено!",

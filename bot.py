@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from admin import admin_handlers, admin_requests, admin_settings
+from admin import admin_handlers, admin_referrals, admin_requests, admin_settings
 from config import BOT_TOKEN
 from database import Database
 
@@ -44,6 +44,7 @@ async def main():
     dp.include_router(admin_handlers.router)
     dp.include_router(admin_requests.router)
     dp.include_router(admin_settings.router)
+    dp.include_router(admin_referrals.router)
 
     # Инициализация базы данных
     db = Database()

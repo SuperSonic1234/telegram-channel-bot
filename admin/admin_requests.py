@@ -418,6 +418,18 @@ async def payout_completed(callback: CallbackQuery, bot: Bot):
         return
 
     amount = request[f"calculated_price_{request['payment_method']}"]
+    referrer_id = await db.mark_referral_sold(
+        request["user_id"], request_id, amount, request["payment_method"]
+    )
+    if referrer_id:
+        try:
+            await bot.send_message(
+                referrer_id,
+                f"🎉 Ваш реферал продал канал!\n💰 Сумма: {amount} {request['payment_method'].upper()}\n"
+                "Счётчик проданных рефералов увеличен.",
+            )
+        except Exception:
+            logger.exception("Не удалось уведомить пригласившего пользователя %s", referrer_id)
     notification_error = False
     try:
         await bot.send_message(

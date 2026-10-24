@@ -117,6 +117,35 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (request_id) REFERENCES sale_requests (id)
                 );
+
+                CREATE TABLE IF NOT EXISTS referrals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    referrer_id INTEGER NOT NULL,
+                    referred_id INTEGER NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sold_at TIMESTAMP,
+                    sale_request_id INTEGER,
+                    sale_amount REAL,
+                    sale_currency TEXT,
+                    status TEXT NOT NULL DEFAULT 'invited',
+                    FOREIGN KEY (referrer_id) REFERENCES users (user_id),
+                    FOREIGN KEY (referred_id) REFERENCES users (user_id),
+                    FOREIGN KEY (sale_request_id) REFERENCES sale_requests (id)
+                );
+
+                CREATE TABLE IF NOT EXISTS referral_rewards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    reward_number INTEGER NOT NULL,
+                    invited_count INTEGER NOT NULL,
+                    sold_count INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    rejection_reason TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id),
+                    UNIQUE (user_id, reward_number)
+                );
                 """
             )
 
@@ -153,6 +182,8 @@ class Database:
                     ("gram_to_rub_override", ""),
                     ("stars_to_gram_rate", "0.01"),
                     ("stars_to_rub_rate", "1"),
+                    ("referral_enabled", "1"),
+                    ("referral_nft_threshold", "5"),
                 ],
             )
             await db.commit()
@@ -190,6 +221,106 @@ class Database:
                 return await cursor.fetchone()
         finally:
             await db.close()
+
+    async def register_referral(self, referrer_id: int, referred_id: int) -> bool:
+        if referrer_id == referred_id:
+            return False
+        db = await self._connect()
+        try:
+            cursor = await db.execute(
+                """INSERT OR IGNORE INTO referrals (referrer_id, referred_id)
+                SELECT ?, ? WHERE EXISTS (SELECT 1 FROM users WHERE user_id = ?)
+                AND EXISTS (SELECT 1 FROM users WHERE user_id = ?)""",
+                (referrer_id, referred_id, referrer_id, referred_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+        finally:
+            await db.close()
+
+    async def mark_referral_sold(self, referred_id: int, request_id: int, amount: float, currency: str) -> int | None:
+        db = await self._connect()
+        try:
+            cursor = await db.execute(
+                """UPDATE referrals SET status = 'sold', sold_at = ?, sale_request_id = ?,
+                sale_amount = ?, sale_currency = ? WHERE referred_id = ? AND status = 'invited'""",
+                (utc_now(), request_id, amount, currency, referred_id),
+            )
+            if cursor.rowcount != 1:
+                await db.commit()
+                return None
+            async with db.execute("SELECT referrer_id FROM referrals WHERE referred_id = ?", (referred_id,)) as cursor:
+                row = await cursor.fetchone()
+            await db.commit()
+            return int(row[0]) if row else None
+        finally:
+            await db.close()
+
+    async def get_referral_stats(self, user_id: int) -> dict[str, Any]:
+        threshold = max(int(await self.get_setting("referral_nft_threshold") or 5), 1)
+        enabled = (await self.get_setting("referral_enabled") or "1") == "1"
+        db = await self._connect()
+        try:
+            async with db.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ?", (user_id,)) as cursor:
+                invited = (await cursor.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND status = 'sold'", (user_id,)) as cursor:
+                sold = (await cursor.fetchone())[0]
+            return {"invited": invited, "sold": sold, "threshold": threshold, "enabled": enabled,
+                    "can_claim": enabled and sold >= threshold}
+        finally:
+            await db.close()
+
+    async def get_sold_referrals(self, user_id: int) -> list[aiosqlite.Row]:
+        return await self._fetchall(
+            "SELECT r.*, u.username FROM referrals r JOIN users u ON u.user_id = r.referred_id WHERE r.referrer_id = ? AND r.status = 'sold' ORDER BY r.sold_at DESC",
+            (user_id,),
+        )
+
+    async def request_referral_reward(self, user_id: int) -> aiosqlite.Row | None:
+        stats = await self.get_referral_stats(user_id)
+        if not stats["can_claim"]:
+            return None
+        reward_number = stats["sold"] // stats["threshold"]
+        db = await self._connect()
+        try:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM referral_rewards WHERE user_id = ? AND reward_number = ?", (user_id, reward_number)) as cursor:
+                existing = await cursor.fetchone()
+            if existing and existing["status"] in {"pending", "sent"}:
+                return existing
+            if existing:
+                await db.execute("UPDATE referral_rewards SET status = 'pending', requested_at = ?, processed_at = NULL, rejection_reason = NULL WHERE id = ?", (utc_now(), existing["id"]))
+            else:
+                await db.execute("INSERT INTO referral_rewards (user_id, reward_number, invited_count, sold_count) VALUES (?, ?, ?, ?)", (user_id, reward_number, stats["invited"], stats["sold"]))
+            await db.commit()
+            async with db.execute("SELECT * FROM referral_rewards WHERE user_id = ? AND reward_number = ?", (user_id, reward_number)) as cursor:
+                return await cursor.fetchone()
+        finally:
+            await db.close()
+
+    async def get_pending_referral_rewards(self) -> list[aiosqlite.Row]:
+        return await self._fetchall("SELECT rr.*, u.username FROM referral_rewards rr JOIN users u ON u.user_id = rr.user_id WHERE rr.status = 'pending' ORDER BY rr.requested_at ASC")
+
+    async def get_referral_reward(self, reward_id: int) -> aiosqlite.Row | None:
+        rows = await self._fetchall("SELECT rr.*, u.username FROM referral_rewards rr JOIN users u ON u.user_id = rr.user_id WHERE rr.id = ?", (reward_id,))
+        return rows[0] if rows else None
+
+    async def process_referral_reward(self, reward_id: int, status: str, rejection_reason: str | None = None) -> bool:
+        if status not in {"sent", "rejected"}:
+            return False
+        db = await self._connect()
+        try:
+            cursor = await db.execute("UPDATE referral_rewards SET status = ?, processed_at = ?, rejection_reason = ? WHERE id = ? AND status = 'pending'", (status, utc_now(), rejection_reason, reward_id))
+            await db.commit()
+            return cursor.rowcount == 1
+        finally:
+            await db.close()
+
+    async def get_referral_leaderboard(self) -> list[aiosqlite.Row]:
+        return await self._fetchall("""SELECT u.user_id, u.username, COUNT(r.id) AS invited_count,
+            SUM(CASE WHEN r.status = 'sold' THEN 1 ELSE 0 END) AS sold_count
+            FROM users u LEFT JOIN referrals r ON r.referrer_id = u.user_id
+            GROUP BY u.user_id ORDER BY sold_count DESC, invited_count DESC""")
 
     async def create_sale_request(
         self,
